@@ -74,11 +74,10 @@ defmodule Episteme.MixProject do
   end
 
   defp description do
-    "A standalone Prolog-like resolution engine and clause database for Elixir -- " <>
+    "A standalone Prolog-like resolution engine and clause database for Elixir: " <>
       "terms, unification, SLD-resolution, backtracking, a genuine clause-scoped cut, " <>
-      "and a small builtin-predicate set, built directly on Ichor's search substrate. " <>
-      "No parser and no dependency on any concrete surface syntax -- build the database " <>
-      "and goal terms yourself, or use a front-end (Aletheia's reader is one) on top."
+      "and builtin predicates, built on Ichor's search substrate. No parser -- bring " <>
+      "your own front-end (e.g. Aletheia) or build goal terms directly."
   end
 
   defp package do

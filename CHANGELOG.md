@@ -84,3 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generating independent fresh variables, so e.g.
   `and(length(L, 3), unify(L, [a, b, c]))` wrongly failed (the shared
   variable couldn't unify with two different values at once).
+- The package `description` in `mix.exs` exceeded Hex's 300-character
+  limit, so `mix hex.build` (and thus `mix hex.publish`, and the CI
+  job that runs `hex.build` to verify the package assembles) failed
+  outright. Trimmed to fit while keeping the same content.
