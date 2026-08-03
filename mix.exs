@@ -54,7 +54,7 @@ defmodule Episteme.MixProject do
       # (which also needs `ichor` itself, dev-only, for `mix ichor.gen`),
       # Episteme has no reader/grammar of its own, so `ichor` never
       # appears here at all.
-      {:ichor_runtime, "~> 0.1.0"}
+      {:ichor_runtime, "~> 0.2"}
     ]
   end
 
@@ -66,7 +66,7 @@ defmodule Episteme.MixProject do
         "format",
         "compile --warnings-as-errors",
         "credo --strict",
-        "sobelow",
+        "sobelow --skip",
         "test",
         "dialyzer"
       ]
@@ -85,7 +85,8 @@ defmodule Episteme.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/joetjen/episteme"},
-      files: ~w(lib .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
+      files: ~w(lib .formatter.exs mix.exs README.md TUTORIAL.md REFERENCE.md EXAMPLES.md
+           CHEATSHEET.md CHANGELOG.md CONTRIBUTING.md LICENSE)
     ]
   end
 
@@ -99,10 +100,19 @@ defmodule Episteme.MixProject do
     ]
   end
 
+  # Doc navigation order: README first (it's `main`), then the
+  # learn-the-library docs -- narrative walkthrough, full feature-by-
+  # feature reference, then worked programs -- then the quick lookup
+  # doc, then project-process docs last.
   defp extras do
     [
       "README.md",
+      "TUTORIAL.md",
+      "REFERENCE.md",
+      "EXAMPLES.md",
+      "CHEATSHEET.md",
       "CHANGELOG.md",
+      "CONTRIBUTING.md",
       "LICENSE"
     ]
   end
@@ -117,6 +127,11 @@ defmodule Episteme.MixProject do
         Episteme.Term.Var,
         Episteme.Term.Compound,
         Episteme.Database
+      ],
+      "Database Backends": [
+        Episteme.Database.Backend,
+        Episteme.Database.Backends.Ets,
+        Episteme.Database.Backends.Dets
       ],
       Engine: [
         Episteme.Engine

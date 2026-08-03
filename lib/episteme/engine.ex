@@ -4,10 +4,16 @@ defmodule Episteme.Engine do
   plus `Episteme.Database` -- clause selection is `disjunction/2` folded
   over a predicate's clauses in declared order, subgoal sequencing is
   `conjunction/2`, both reused unmodified from Ichor. Control constructs
-  (`,` `;` `->` `!` `\\+` `call/N` `once/1`) live directly here rather
-  than in a separate builtins module: they turned out, once actually
-  implemented, to be inseparable from the cut-barrier machinery below,
-  not independent predicates dispatchable through a generic table.
+  (`and`, `or`, `if_then`/`if_then_else`, `cut`, `not/1`, `call/N`,
+  `once/1`) live directly here rather than in a separate builtins
+  module: they turned out, once actually implemented, to be inseparable
+  from the cut-barrier machinery below, not independent predicates
+  dispatchable through a generic table. Every one of these is a plain
+  English name, not the traditional Prolog operator (`,`/`;`/`->`/`!`/
+  `\\+`) it corresponds to -- Episteme has no reader of its own (see
+  `Episteme`'s moduledoc), so there's no textual syntax for any of this
+  to look "conventional" against; a word you can actually remember beat
+  matching ISO Prolog's punctuation.
 
   ## Cut
 
@@ -15,14 +21,15 @@ defmodule Episteme.Engine do
   choice made since entering the *current clause* specifically,
   including pruning alternatives for goals that already SUCCEEDED
   earlier in the same body, which a bindings-borne "cut fired" marker
-  can't express: `p :- !, fail.` with a second clause `p :- true.` must
-  fail `p` outright (cut commits to clause 1 before `fail` ever runs),
-  but a clause body that never produces a solution never gives a
+  can't express. The textbook illustration, in real Prolog's own
+  textual syntax: `p :- !, fail.` with a second clause `p :- true.`
+  must fail `p` outright (cut commits to clause 1 before `fail` ever
+  runs), but a clause body that never produces a solution never gives a
   marker-on-solutions scheme anything to inspect.
 
-  So `!` succeeds once normally, but its "give me another solution"
+  So `cut` succeeds once normally, but its "give me another solution"
   continuation `throw({:episteme_cut, barrier})`s instead of returning
-  `:empty`. Every predicate call (and `call/N`, `once/1`, `\\+/1` --
+  `:empty`. Every predicate call (and `call/N`, `once/1`, `not/1` --
   each cut-opaque per ISO) mints a fresh `barrier = make_ref()` and
   wraps its own clause-disjunction's lazy solution stream in
   `guard_cut/2`, which re-wraps every successive `rest` thunk so the
@@ -109,14 +116,18 @@ defmodule Episteme.Engine do
   defp dispatch(true, bindings, _db, _barrier), do: Tree.unit().(bindings)
   defp dispatch(:fail, bindings, _db, _barrier), do: Tree.fail().(bindings)
   defp dispatch(false, bindings, _db, _barrier), do: Tree.fail().(bindings)
-  defp dispatch(:!, bindings, _db, barrier), do: cut_goal(barrier).(bindings)
+  defp dispatch(:cut, bindings, _db, barrier), do: cut_goal(barrier).(bindings)
 
-  defp dispatch(%Compound{name: :",", args: [a, b]}, bindings, db, barrier) do
+  defp dispatch(%Compound{name: :and, args: [a, b]}, bindings, db, barrier) do
     Tree.conjunction(goal(a, db, barrier), goal(b, db, barrier)).(bindings)
   end
 
+  defp dispatch(%Compound{name: :or, args: [a, b]}, bindings, db, barrier) do
+    Tree.disjunction(goal(a, db, barrier), goal(b, db, barrier)).(bindings)
+  end
+
   defp dispatch(
-         %Compound{name: :";", args: [%Compound{name: :->, args: [cond_, then_]}, else_]},
+         %Compound{name: :if_then_else, args: [cond_, then_, else_]},
          bindings,
          db,
          barrier
@@ -124,15 +135,11 @@ defmodule Episteme.Engine do
     if_then_else(cond_, then_, else_, bindings, db, barrier)
   end
 
-  defp dispatch(%Compound{name: :";", args: [a, b]}, bindings, db, barrier) do
-    Tree.disjunction(goal(a, db, barrier), goal(b, db, barrier)).(bindings)
-  end
-
-  defp dispatch(%Compound{name: :->, args: [cond_, then_]}, bindings, db, barrier) do
+  defp dispatch(%Compound{name: :if_then, args: [cond_, then_]}, bindings, db, barrier) do
     if_then_else(cond_, then_, :fail, bindings, db, barrier)
   end
 
-  defp dispatch(%Compound{name: :"\\+", args: [g]}, bindings, db, _barrier) do
+  defp dispatch(%Compound{name: :not, args: [g]}, bindings, db, _barrier) do
     negation_as_failure(g, bindings, db)
   end
 
@@ -147,26 +154,36 @@ defmodule Episteme.Engine do
     guard_cut(goal(built, db, inner_barrier).(bindings), inner_barrier)
   end
 
+  # -- solution aggregation --
+
+  defp dispatch(%Compound{name: :findall, args: [template, g, result]}, bindings, db, _barrier) do
+    findall_goal(template, g, result, bindings, db)
+  end
+
+  defp dispatch(%Compound{name: :forall, args: [cond_, action]}, bindings, db, _barrier) do
+    forall_goal(cond_, action, bindings, db)
+  end
+
   # -- unification / comparison --
 
-  defp dispatch(%Compound{name: :=, args: [a, b]}, bindings, _db, _barrier) do
+  defp dispatch(%Compound{name: :unify, args: [a, b]}, bindings, _db, _barrier) do
     case Bindings.unify(Term, bindings, a, b) do
       {:ok, extended} -> Tree.unit().(extended)
       :fail -> Tree.fail().(bindings)
     end
   end
 
-  defp dispatch(%Compound{name: :"\\=", args: [a, b]}, bindings, _db, _barrier) do
+  defp dispatch(%Compound{name: :not_unify, args: [a, b]}, bindings, _db, _barrier) do
     case Bindings.unify(Term, bindings, a, b) do
       {:ok, _} -> Tree.fail().(bindings)
       :fail -> Tree.unit().(bindings)
     end
   end
 
-  defp dispatch(%Compound{name: :==, args: [a, b]}, bindings, _db, _barrier),
+  defp dispatch(%Compound{name: :equal, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(structurally_equal?(a, b, bindings), bindings)
 
-  defp dispatch(%Compound{name: :"\\==", args: [a, b]}, bindings, _db, _barrier),
+  defp dispatch(%Compound{name: :not_equal, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(not structurally_equal?(a, b, bindings), bindings)
 
   # -- type checks --
@@ -230,10 +247,10 @@ defmodule Episteme.Engine do
     end
   end
 
-  defp dispatch(%Compound{name: :"=:=", args: [a, b]}, bindings, _db, _barrier),
+  defp dispatch(%Compound{name: :numeric_equal, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(Arithmetic.compare(a, b, bindings, &==/2), bindings)
 
-  defp dispatch(%Compound{name: :"=\\=", args: [a, b]}, bindings, _db, _barrier),
+  defp dispatch(%Compound{name: :numeric_not_equal, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(Arithmetic.compare(a, b, bindings, &!=/2), bindings)
 
   defp dispatch(%Compound{name: :<, args: [a, b]}, bindings, _db, _barrier),
@@ -242,10 +259,10 @@ defmodule Episteme.Engine do
   defp dispatch(%Compound{name: :>, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(Arithmetic.compare(a, b, bindings, &>/2), bindings)
 
-  defp dispatch(%Compound{name: :"=<", args: [a, b]}, bindings, _db, _barrier),
+  defp dispatch(%Compound{name: :less_or_equal, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(Arithmetic.compare(a, b, bindings, &<=/2), bindings)
 
-  defp dispatch(%Compound{name: :>=, args: [a, b]}, bindings, _db, _barrier),
+  defp dispatch(%Compound{name: :greater_or_equal, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(Arithmetic.compare(a, b, bindings, &>=/2), bindings)
 
   # -- exceptions --
@@ -291,10 +308,30 @@ defmodule Episteme.Engine do
     end
   end
 
-  # -- lists / io, then user-defined predicates --
+  # -- dynamic database (assert/retract) --
+
+  defp dispatch(%Compound{name: n, args: [clause_term]}, bindings, db, _barrier)
+       when n in [:assert, :assertz] do
+    do_assert(clause_term, bindings, db, :end)
+  end
+
+  defp dispatch(%Compound{name: :asserta, args: [clause_term]}, bindings, db, _barrier) do
+    do_assert(clause_term, bindings, db, :front)
+  end
+
+  defp dispatch(%Compound{name: :retract, args: [clause_term]}, bindings, db, _barrier) do
+    retract_goal(clause_term, bindings, db)
+  end
+
+  defp dispatch(%Compound{name: :retractall, args: [head_pattern]}, bindings, db, _barrier) do
+    retractall_goal(head_pattern, bindings, db)
+  end
+
+  # -- arithmetic / lists / io, then user-defined predicates --
 
   defp dispatch(%Compound{name: name, args: args}, bindings, db, _barrier) do
-    with :not_handled <- Lists.dispatch(name, length(args), args),
+    with :not_handled <- Arithmetic.dispatch(name, length(args), args),
+         :not_handled <- Lists.dispatch(name, length(args), args),
          :not_handled <- Io.dispatch(name, length(args), args) do
       solve_user_predicate(name, args, bindings, db)
     else
@@ -346,6 +383,59 @@ defmodule Episteme.Engine do
     end
   end
 
+  # `findall/3` is cut-opaque and always succeeds -- `[]` is a perfectly
+  # good answer when `g` has no solutions, unlike `bagof/3`/`setof/3`
+  # (not implemented here) which fail in that case instead.
+  defp findall_goal(template, g, result, bindings, db) do
+    inner_barrier = make_ref()
+    stream = guard_cut(goal(g, db, inner_barrier).(bindings), inner_barrier)
+    collected = collect_solutions(stream, template)
+
+    case Bindings.unify(Term, bindings, result, collected) do
+      {:ok, extended} -> Tree.unit().(extended)
+      :fail -> Tree.fail().(bindings)
+    end
+  end
+
+  defp collect_solutions(stream, template) do
+    case Tree.next(stream) do
+      :empty ->
+        []
+
+      {:solution, sol_bindings, rest} ->
+        [Term.resolve_deep(template, sol_bindings) | collect_solutions(rest, template)]
+    end
+  end
+
+  # `forall(Cond, Action)` <-> `\+ (Cond, \+ Action)`, but walked directly
+  # rather than built out of two nested negations: succeeds iff every
+  # solution of `Cond` (cut-opaque) has at least one solution of `Action`
+  # (also cut-opaque) under it. Never binds anything in `bindings`,
+  # exactly like `\+/1`.
+  defp forall_goal(cond_, action, bindings, db) do
+    cond_barrier = make_ref()
+    cond_stream = guard_cut(goal(cond_, db, cond_barrier).(bindings), cond_barrier)
+    bool_goal(every_solution_succeeds?(cond_stream, action, db), bindings)
+  end
+
+  defp every_solution_succeeds?(cond_stream, action, db) do
+    case Tree.next(cond_stream) do
+      :empty ->
+        true
+
+      {:solution, cond_bindings, rest} ->
+        action_barrier = make_ref()
+
+        action_stream =
+          guard_cut(goal(action, db, action_barrier).(cond_bindings), action_barrier)
+
+        case Tree.next(action_stream) do
+          {:solution, _bindings, _rest} -> every_solution_succeeds?(rest, action, db)
+          :empty -> false
+        end
+    end
+  end
+
   defp build_call(g, [], _bindings), do: g
 
   defp build_call(g, extra, bindings) do
@@ -370,16 +460,21 @@ defmodule Episteme.Engine do
     end
   end
 
+  # `Database.defined?/3` (not "clause list is empty"), because
+  # `retractall/1` can leave a predicate with zero clauses while still
+  # having declared it dynamic -- calling it afterward must fail
+  # silently, the same as it would after removing the last clause one
+  # `retract/1` at a time, not raise `existence_error` as if it had
+  # never been asserted at all.
   defp solve_user_predicate(name, args, bindings, db) do
     arity = length(args)
-    clauses = Database.clauses_for(db, name, arity)
 
-    if clauses == [] do
+    if Database.defined?(db, name, arity) do
+      call_term = if arity == 0, do: name, else: %Compound{name: name, args: args}
+      try_clauses(Database.clauses_for(db, name, arity), call_term, bindings, db)
+    else
       indicator = %Compound{name: :/, args: [name, arity]}
       prolog_throw(Exceptions.existence_error(:procedure, indicator))
-    else
-      call_term = if arity == 0, do: name, else: %Compound{name: name, args: args}
-      try_clauses(clauses, call_term, bindings, db)
     end
   end
 
@@ -404,6 +499,114 @@ defmodule Episteme.Engine do
         :fail -> Tree.fail().(bindings)
       end
     end
+  end
+
+  # ---- dynamic database (assert/retract) -------------------------------------
+
+  # A clause is stored resolved against the caller's *current* bindings
+  # and then renamed apart, exactly like a fact/rule read from source:
+  # any variable still unbound at assert-time becomes that stored
+  # clause's own private variable, sharing nothing with the goal that
+  # asserted it.
+  defp do_assert(clause_term, bindings, db, position) do
+    clause_term
+    |> Term.resolve_deep(bindings)
+    |> Term.fresh_copy()
+    |> store_clause(db, position)
+
+    Tree.unit().(bindings)
+  end
+
+  defp store_clause(%Compound{name: :":-", args: [head, body]}, db, position),
+    do: assert_clause(head, body, db, position)
+
+  defp store_clause(%Var{}, _db, _position), do: prolog_throw(Exceptions.instantiation_error())
+  defp store_clause(%Compound{} = head, db, position), do: assert_clause(head, true, db, position)
+
+  defp store_clause(head, db, position) when is_atom(head),
+    do: assert_clause(head, true, db, position)
+
+  defp store_clause(other, _db, _position),
+    do: prolog_throw(Exceptions.type_error(:callable, other))
+
+  defp assert_clause(head, body, db, :end), do: Database.add_clause(db, {head, body})
+  defp assert_clause(head, body, db, :front), do: Database.add_clause_first(db, {head, body})
+
+  # `retract/1` takes either a bare `Head` (body defaults to `true`,
+  # matching a fact) or a `Head :- Body` term, unifies against the first
+  # stored clause (in declared/assert order) whose head *and* body both
+  # unify, removes exactly that clause, and keeps the resulting bindings
+  # (so variables in the retract argument end up bound to the removed
+  # clause's own head/body, same as real Prolog). Fails, without
+  # mutating anything, if no stored clause unifies; deterministic on
+  # success -- unlike some implementations, backtracking into a
+  # successful `retract/1` here does not try the next matching clause.
+  defp retract_goal(clause_term, bindings, db) do
+    case Bindings.resolve(Term, bindings, clause_term) do
+      %Var{} -> prolog_throw(Exceptions.instantiation_error())
+      resolved -> do_retract(resolved, bindings, db)
+    end
+  end
+
+  defp do_retract(%Compound{name: :":-", args: [head, body]}, bindings, db),
+    do: find_and_remove(head, body, bindings, db)
+
+  defp do_retract(head, bindings, db), do: find_and_remove(head, true, bindings, db)
+
+  defp find_and_remove(pattern_head, pattern_body, bindings, db) do
+    {name, arity} = Database.indicator(pattern_head)
+    clauses = Database.clauses_for(db, name, arity)
+
+    case find_matching_clause(clauses, pattern_head, pattern_body, bindings) do
+      {:ok, index, extended} ->
+        Database.replace_clauses(db, name, arity, List.delete_at(clauses, index))
+        Tree.unit().(extended)
+
+      :not_found ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp find_matching_clause(clauses, pattern_head, pattern_body, bindings) do
+    clauses
+    |> Enum.with_index()
+    |> Enum.find_value(:not_found, fn {{stored_head, stored_body}, index} ->
+      %Compound{args: [fresh_head, fresh_body]} =
+        Term.fresh_copy(%Compound{name: :"$clause", args: [stored_head, stored_body]})
+
+      with {:ok, b1} <- Bindings.unify(Term, bindings, pattern_head, fresh_head),
+           {:ok, b2} <- Bindings.unify(Term, b1, pattern_body, fresh_body) do
+        {:ok, index, b2}
+      else
+        :fail -> nil
+      end
+    end)
+  end
+
+  # `retractall/1` removes every stored clause whose *head* unifies with
+  # `head_pattern`, ignoring clause bodies entirely, always succeeds
+  # (even against an undefined predicate, or one already empty), and --
+  # unlike `retract/1` -- never binds anything: each unification is only
+  # used to select clauses, then discarded.
+  defp retractall_goal(head_pattern, bindings, db) do
+    case Bindings.resolve(Term, bindings, head_pattern) do
+      %Var{} -> prolog_throw(Exceptions.instantiation_error())
+      resolved -> do_retractall(resolved, bindings, db)
+    end
+  end
+
+  defp do_retractall(resolved_pattern, bindings, db) do
+    {name, arity} = Database.indicator(resolved_pattern)
+    clauses = Database.clauses_for(db, name, arity)
+
+    kept =
+      Enum.reject(clauses, fn {stored_head, _body} ->
+        fresh_head = Term.fresh_copy(stored_head)
+        match?({:ok, _extended}, Bindings.unify(Term, bindings, resolved_pattern, fresh_head))
+      end)
+
+    Database.replace_clauses(db, name, arity, kept)
+    Tree.unit().(bindings)
   end
 
   @spec prolog_throw(term()) :: no_return()

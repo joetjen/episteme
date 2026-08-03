@@ -10,10 +10,10 @@ defmodule Episteme.CutTest do
   use ExUnit.Case, async: true
   import Episteme.QueryHelper
 
-  test "cut is not once/1: p :- !, fail. with a second clause p :- true. fails outright" do
+  test "cut is not once/1: p :- cut, fail. with a second clause p :- true. fails outright" do
     db =
       db([
-        {:rule, :p, c(:",", [:!, :fail])},
+        {:rule, :p, c(:and, [:cut, :fail])},
         {:rule, :p, true}
       ])
 
@@ -25,7 +25,7 @@ defmodule Episteme.CutTest do
 
     db =
       db([
-        {:rule, c(:r, [x]), c(:";", [c(:",", [c(:=, [x, 1]), :!]), c(:=, [x, 2])])},
+        {:rule, c(:r, [x]), c(:or, [c(:and, [c(:unify, [x, 1]), :cut]), c(:unify, [x, 2])])},
         {:fact, c(:r, [3])}
       ])
 
@@ -38,9 +38,9 @@ defmodule Episteme.CutTest do
 
     db =
       db([
-        {:rule, c(:inner, [1]), :!},
+        {:rule, c(:inner, [1]), :cut},
         {:fact, c(:inner, [2])},
-        {:rule, c(:outer, [x, y]), c(:",", [c(:inner, [x]), c(:q, [y])])},
+        {:rule, c(:outer, [x, y]), c(:and, [c(:inner, [x]), c(:q, [y])])},
         {:fact, c(:q, [1])},
         {:fact, c(:q, [2])}
       ])
@@ -58,30 +58,30 @@ defmodule Episteme.CutTest do
     assert solutions(db, c(:p, [var("X")])) == [%{"X" => 1}]
   end
 
-  test "! inside once/1 does not escape to prune the caller's own alternatives" do
+  test "cut inside once/1 does not escape to prune the caller's own alternatives" do
     db =
       db([
-        {:rule, c(:p, [1]), c(:once, [c(:",", [:!, :fail])])},
+        {:rule, c(:p, [1]), c(:once, [c(:and, [:cut, :fail])])},
         {:fact, c(:p, [2])}
       ])
 
     assert solutions(db, c(:p, [var("X")])) == [%{"X" => 2}]
   end
 
-  test "! inside \\+ does not escape either" do
+  test "cut inside not/1 does not escape either" do
     db =
       db([
-        {:rule, c(:p, [1]), c(:"\\+", [c(:",", [:!, :fail])])},
+        {:rule, c(:p, [1]), c(:not, [c(:and, [:cut, :fail])])},
         {:fact, c(:p, [2])}
       ])
 
     assert solutions(db, c(:p, [var("X")])) == [%{"X" => 1}, %{"X" => 2}]
   end
 
-  test "! inside call/1 does not escape" do
+  test "cut inside call/1 does not escape" do
     db =
       db([
-        {:rule, c(:p, [1]), c(:call, [c(:",", [:!, :fail])])},
+        {:rule, c(:p, [1]), c(:call, [c(:and, [:cut, :fail])])},
         {:fact, c(:p, [2])}
       ])
 
@@ -93,7 +93,7 @@ defmodule Episteme.CutTest do
 
     db =
       db([
-        {:rule, c(:p, [x]), c(:",", [:!, c(:member, [x, [1, 2, 3]])])},
+        {:rule, c(:p, [x]), c(:and, [:cut, c(:member, [x, [1, 2, 3]])])},
         {:rule, c(:p, [var("_")]), true}
       ])
 

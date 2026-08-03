@@ -34,7 +34,8 @@ defmodule Episteme.Builtins.Lists do
       %Var{} ->
         case Bindings.resolve(Term, bindings, len) do
           n when is_integer(n) and n >= 0 ->
-            unify_goal(list, List.duplicate(Term.new_var("_"), n), bindings)
+            fresh_vars = Stream.repeatedly(fn -> Term.new_var("_") end) |> Enum.take(n)
+            unify_goal(list, fresh_vars, bindings)
 
           _ ->
             Tree.fail().(bindings)
