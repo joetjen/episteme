@@ -54,7 +54,7 @@ defmodule Episteme.MixProject do
       # (which also needs `ichor` itself, dev-only, for `mix ichor.gen`),
       # Episteme has no reader/grammar of its own, so `ichor` never
       # appears here at all.
-      {:ichor_runtime, "~> 0.1.0"}
+      {:ichor_runtime, "~> 0.2"}
     ]
   end
 

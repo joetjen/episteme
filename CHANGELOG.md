@@ -63,6 +63,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `# sobelow_skip [...]` justification comment on `Episteme.query_once/2`
   (a documented low-confidence false positive) instead of only silencing
   it by happenstance of `sobelow`'s own default exit code.
+- `ichor_runtime` requirement bumped from `~> 0.1.0` to `~> 0.2`,
+  resolving to `0.2.0`. That release's breaking change (`raw_captures`
+  becoming an ordered list of pairs instead of a map) is confined to
+  `Ichor.Actions`/`Ichor.Capture`/the grammar runtime, none of which
+  Episteme touches — it only uses `Ichor.Backtrack.*` and
+  `Ichor.Toolkit.TermWalk`, both unaffected, so this is a no-op for
+  Episteme's own behavior.
 
 ### Fixed
 
