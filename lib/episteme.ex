@@ -36,6 +36,11 @@ defmodule Episteme do
 
   @doc "Like `query/2`, but returns only the first solution (or `:none`)."
   @spec query_once(term(), Database.t()) :: {:ok, solution()} | :none | {:error, term()}
+  # sobelow_skip ["SQL.Query"]
+  # Flagged purely on the function's name -- this module has no database
+  # driver, no Ecto, no raw SQL string anywhere in it; `goal_term`/`db`
+  # are a Prolog term and an `Episteme.Database.t()`, never interpolated
+  # into a query string of any kind. Low-confidence false positive.
   def query_once(goal_term, db) do
     case query(goal_term, db) do
       {:ok, [first | _]} -> {:ok, first}
@@ -109,9 +114,14 @@ defmodule Episteme do
     Enum.reduce(args, acc, &collect_named_vars/2)
   end
 
-  defp collect_named_vars(list, acc) when is_list(list) do
-    Enum.reduce(list, acc, &collect_named_vars/2)
-  end
+  defp collect_named_vars([], acc), do: acc
+
+  # `[H | T]` recurses into `T` directly (not via `Enum.reduce`, which
+  # requires a proper/nil-terminated list) because `T` need not be a
+  # list at all -- `[1 | X]` (a partial list, ending in a variable
+  # rather than `[]`) is an ordinary, legal top-level term, and
+  # `Enum.reduce` raises on it as unenumerable.
+  defp collect_named_vars([h | t], acc), do: collect_named_vars(t, collect_named_vars(h, acc))
 
   defp collect_named_vars(_other, acc), do: acc
 end

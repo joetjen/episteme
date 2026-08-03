@@ -8,6 +8,16 @@ defmodule Episteme.ListsTest do
     assert [%{"L" => list}] = solutions(empty, c(:length, [var("L"), 2]))
     assert length(list) == 2
     assert Enum.all?(list, &match?(%Episteme.Term.Var{}, &1))
+    # each generated variable must be independently fresh, not the same
+    # variable duplicated -- otherwise unifying the list against two
+    # different values in different positions would wrongly conflict
+    assert list |> Enum.map(& &1.ref) |> Enum.uniq() |> length() == 2
+  end
+
+  test "length/2 with an unbound list builds independently-fresh variables, not one shared variable" do
+    l = var("L")
+    goal = c(:and, [c(:length, [l, 3]), c(:unify, [l, [:a, :b, :c]])])
+    assert solutions(db(), goal) == [%{"L" => [:a, :b, :c]}]
   end
 
   test "append/3 forwards mode" do
