@@ -58,7 +58,7 @@ c = fn name, args -> %Compound{name: name, args: args} end
   `upcase_atom`, `downcase_atom`, `atomic_list_concat`, `atom_string`,
   `string_to_atom`, `string_concat`, `string_chars`, `string_codes`,
   `string_length`, `number_string`, `split_string`
-- [I/O](#io) — `write`, `writeln`, `print`, `nl`
+- [I/O](#io) — `write`, `writeln`, `print`, `nl`, `format`
 
 A note before diving in: every goal name below is a plain English word
 (`and`, `or`, `unify`, ...), not real Prolog's punctuation operator
@@ -1508,3 +1508,41 @@ Prints a single newline and succeeds.
 Episteme.query(:nl, Database.new())
 #=> prints "\n", then {:ok, [%{}]}
 ```
+
+### `format/1` and `format/2`
+
+`format(Format, Args)` prints `Format`'s text (an atom or string) with
+each `~`-directive replaced in turn by the next element of `Args`
+(consumed left to right) — `format/1` is `format/2` with `Args = []`.
+A single non-list `Args` is treated as the one-element list `[Args]`,
+so `format("~w", foo)` works without wrapping `foo` yourself.
+
+Deliberately a practical subset of ISO/SWI's own directive set, not
+all of it — no column/radix directives (`~t`, `~|`, `~Nr`, ...), no
+numeric-prefixed `~Nd` ("insert a decimal point `N` digits from the
+right"). `~w`, `~p`, and `~q` are all the same thing here
+(`Episteme.Term.to_text/1`), since there's no operator-aware or quoted
+writer yet to tell them apart with — same caveat `write/1` above
+already has.
+
+| Directive | Consumes an argument? | Meaning |
+|---|---|---|
+| `~w`, `~p`, `~q` | yes | `Episteme.Term.to_text/1` of the argument. |
+| `~a` | yes | The argument's text — must be an atom (`type_error(atom, _)` otherwise). |
+| `~d` | yes | The argument's text — must be an integer (`type_error(integer, _)` otherwise). |
+| `~s` | yes | The argument as text — a code list or a string. |
+| `~i` | yes | Consumes the argument, prints nothing. |
+| `~n` | no | A newline. |
+| `~~` | no | A literal `~`. |
+
+```elixir
+Episteme.query(c.(:format, ["Hello, ~w! You are ~d years old.~n", [:world, 30]]), Database.new())
+#=> prints "Hello, world! You are 30 years old.\n", then {:ok, [%{}]}
+
+Episteme.query(c.(:format, ["codes: ~s", [[104, 105]]]), Database.new())
+#=> prints "codes: hi", then {:ok, [%{}]}
+```
+
+Running out of `Args` for a directive that needs one raises
+`domain_error(format_arguments, [])`; an unrecognized `~`-directive
+raises `domain_error(format_directive, Char)`.
