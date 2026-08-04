@@ -200,42 +200,17 @@ defmodule Episteme.Builtins.Lists do
 
   defp msort_goal(list, sorted, bindings) do
     case proper_elements(list, bindings) do
-      {:ok, elements} ->
-        unify_goal(sorted, Enum.sort(elements, &(Term.compare_order(&1, &2) != :gt)), bindings)
-
-      :error ->
-        Tree.fail().(bindings)
+      {:ok, elements} -> unify_goal(sorted, Term.sort_by_order(elements), bindings)
+      :error -> Tree.fail().(bindings)
     end
   end
 
   # Like `msort/2`, but also drops every term that standard-order-compares
-  # `:eq` to its predecessor once sorted -- not plain Elixir `==`, which
-  # would wrongly conflate `1` and `1.0` (equal by `==`, but never `:eq`
-  # in standard order -- see `Term.compare_order/2`'s own float-before-
-  # integer tie-break).
+  # `:eq` to its predecessor once sorted -- see `Term.sort_unique/1`.
   defp sort_goal(list, sorted, bindings) do
     case proper_elements(list, bindings) do
-      {:ok, elements} ->
-        deduped =
-          elements
-          |> Enum.sort(&(Term.compare_order(&1, &2) != :gt))
-          |> dedup_by_order()
-
-        unify_goal(sorted, deduped, bindings)
-
-      :error ->
-        Tree.fail().(bindings)
-    end
-  end
-
-  defp dedup_by_order([]), do: []
-  defp dedup_by_order([x]), do: [x]
-
-  defp dedup_by_order([a, b | rest]) do
-    if Term.compare_order(a, b) == :eq do
-      dedup_by_order([a | rest])
-    else
-      [a | dedup_by_order([b | rest])]
+      {:ok, elements} -> unify_goal(sorted, Term.sort_unique(elements), bindings)
+      :error -> Tree.fail().(bindings)
     end
   end
 

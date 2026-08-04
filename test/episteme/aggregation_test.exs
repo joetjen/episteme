@@ -89,6 +89,81 @@ defmodule Episteme.AggregationTest do
     end
   end
 
+  describe "bagof/3" do
+    test "groups solutions by the goal's own free variables, backtracking one group per binding" do
+      db =
+        db([
+          {:fact, c(:likes, [:mary, :apples])},
+          {:fact, c(:likes, [:mary, :pears])},
+          {:fact, c(:likes, [:john, :apples])}
+        ])
+
+      person = var("Person")
+      thing = var()
+
+      assert solutions(db, c(:bagof, [thing, c(:likes, [person, thing]), var("L")])) == [
+               %{"Person" => :mary, "L" => [:apples, :pears]},
+               %{"Person" => :john, "L" => [:apples]}
+             ]
+    end
+
+    test "Var^Goal existentially quantifies Var out of the free-variable grouping" do
+      db =
+        db([
+          {:fact, c(:likes, [:mary, :apples])},
+          {:fact, c(:likes, [:mary, :pears])},
+          {:fact, c(:likes, [:john, :apples])}
+        ])
+
+      person = var()
+      thing = var()
+      goal = c(:^, [person, c(:likes, [person, thing])])
+
+      assert solutions(db, c(:bagof, [thing, goal, var("L")])) == [
+               %{"L" => [:apples, :pears, :apples]}
+             ]
+    end
+
+    test "fails outright (not L = []) when the goal has no solutions, unlike findall/3" do
+      db = db([{:fact, c(:num, [1])}])
+      x = var()
+      goal = c(:and, [c(:num, [x]), c(:>, [x, 100])])
+
+      assert solutions(db, c(:bagof, [x, goal, var("L")])) == []
+    end
+
+    test "is cut-opaque: a cut inside the goal doesn't escape to the caller" do
+      db = db([{:rule, c(:g, [1]), :cut}, {:fact, c(:g, [2])}])
+      gx = var()
+
+      assert solutions(db, c(:bagof, [gx, c(:g, [gx]), var("L")])) == [%{"L" => [1]}]
+    end
+  end
+
+  describe "setof/3" do
+    test "sorts and dedups each group by standard order of terms, and orders groups by witness" do
+      db =
+        db([
+          {:fact, c(:likes, [:mary, :pears])},
+          {:fact, c(:likes, [:mary, :apples])},
+          {:fact, c(:likes, [:mary, :apples])},
+          {:fact, c(:likes, [:john, :pears])}
+        ])
+
+      person = var("Person")
+      thing = var()
+
+      assert solutions(db, c(:setof, [thing, c(:likes, [person, thing]), var("L")])) == [
+               %{"Person" => :john, "L" => [:pears]},
+               %{"Person" => :mary, "L" => [:apples, :pears]}
+             ]
+    end
+
+    test "fails when the goal has no solutions" do
+      assert solutions(db(), c(:setof, [var(), :fail, var("L")])) == []
+    end
+  end
+
   describe "between/3" do
     test "enumerates every integer in [Low, High] in order when X is unbound" do
       assert solutions(db(), c(:between, [1, 5, var("X")])) == [

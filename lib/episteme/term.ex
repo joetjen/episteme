@@ -201,6 +201,55 @@ defmodule Episteme.Term do
     end
   end
 
+  @doc """
+  Every distinct variable in `term`, in first-occurrence order (real
+  Prolog's own `term_variables/2`, though not itself exposed as a
+  callable goal yet) -- `Episteme.Engine`'s own building block for
+  `bagof/3`/`setof/3`'s free-variable grouping: which of a `Goal`'s
+  variables aren't mentioned in `Template` and aren't existentially
+  quantified via `Var^Goal`.
+  """
+  @spec term_variables(term()) :: [Var.t()]
+  def term_variables(term) do
+    {vars, _seen} =
+      TermWalk.fold(__MODULE__, term, {[], MapSet.new()}, fn
+        %Var{ref: ref} = v, {vars, seen} ->
+          if MapSet.member?(seen, ref),
+            do: {vars, seen},
+            else: {[v | vars], MapSet.put(seen, ref)}
+
+        _other, acc ->
+          acc
+      end)
+
+    Enum.reverse(vars)
+  end
+
+  @doc "Sorts `list` by `compare_order/2` -- the shared basis for `msort/2` and, deduped, `sort/2`/`setof/3`."
+  @spec sort_by_order([term()]) :: [term()]
+  def sort_by_order(list), do: Enum.sort(list, &(compare_order(&1, &2) != :gt))
+
+  @doc """
+  Like `sort_by_order/1`, but also drops every term that standard-order-
+  compares `:eq` to its predecessor once sorted -- not plain Elixir
+  `==`, which would wrongly conflate `1` and `1.0` (equal by `==`, but
+  never `:eq` in standard order -- see `compare_order/2`'s own
+  float-before-integer tie-break). Shared by `sort/2` and `setof/3`.
+  """
+  @spec sort_unique([term()]) :: [term()]
+  def sort_unique(list), do: list |> sort_by_order() |> dedup_adjacent_by_order()
+
+  defp dedup_adjacent_by_order([]), do: []
+  defp dedup_adjacent_by_order([x]), do: [x]
+
+  defp dedup_adjacent_by_order([a, b | rest]) do
+    if compare_order(a, b) == :eq do
+      dedup_adjacent_by_order([a | rest])
+    else
+      [a | dedup_adjacent_by_order([b | rest])]
+    end
+  end
+
   @doc "True iff `term` contains no unbound variable anywhere -- resolve deeply first (see `resolve_deep/2`) if `term` may still hold bindings."
   @spec ground?(term()) :: boolean()
   def ground?(%Var{}), do: false
