@@ -1,8 +1,8 @@
 defmodule Episteme.Term do
   @moduledoc """
   Episteme's term representation: atoms and numbers are plain Elixir
-  atoms/integers/floats, a real Prolog string (see `string_type_decision`,
-  DESIGN.md) is a plain Elixir binary -- a genuinely new atomic term
+  atoms/integers/floats, a real Prolog string is a plain Elixir binary
+  -- a genuinely new atomic term
   class, not a list of codes, but still no dedicated struct, the same
   "raw host-language value" pattern atoms/integers/floats already use --
   lists are native Elixir lists, variables and compounds get dedicated
@@ -139,8 +139,8 @@ defmodule Episteme.Term do
   sorting before an integer of equal value (`1.0` before `1`); atoms
   alphabetically by character code (`[]`, the empty-list atom, sorts
   as if its name were the two characters `[` `]`, same as any other
-  atom); strings (see `string_type_decision`, DESIGN.md) alphabetically
-  by byte value, same comparator as atoms; compounds (a non-empty list
+  atom); strings alphabetically by byte value, same comparator as
+  atoms; compounds (a non-empty list
   decomposes via the same `'.'/2` cons functor `compound?/1` uses
   everywhere else) by arity first, then functor name alphabetically,
   then arguments left to right, recursively.

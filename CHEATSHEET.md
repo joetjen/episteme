@@ -60,7 +60,7 @@ same vocabulary, defined there at more length.
 | atom `foo` | `:foo` |
 | integer `42` | `42` |
 | float `3.14` | `3.14` |
-| string `"foo"` | `"foo"` (a native Elixir binary -- a distinct type from atoms, see `string_type_decision`, DESIGN.md) |
+| string `"foo"` | `"foo"` (a native Elixir binary -- a distinct type from atoms) |
 | variable `X` | `Term.new_var("X")` (anonymous: `Term.new_var()`, name defaults to `"_"`) |
 | compound `foo(A, B)` | `%Compound{name: :foo, args: [a, b]}` |
 | list `[1, 2, 3]` | `[1, 2, 3]` (a native Elixir list) |
@@ -135,7 +135,7 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 | `var(X)` | An unbound variable. |
 | `nonvar(X)` | Anything else. |
 | `atom(X)` | A plain atom. |
-| `string(X)` | A real string (see string_type_decision, DESIGN.md) -- never true for an atom with the same characters. |
+| `string(X)` | A real string -- never true for an atom with the same characters. |
 | `atomic(X)` | An atom, number, or string (not a variable, compound, or list). |
 | `number(X)` | An integer or float. |
 | `integer(X)` | An integer. |

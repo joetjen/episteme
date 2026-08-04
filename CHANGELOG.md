@@ -37,10 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A real string type -- a genuinely new atomic term class, backed by
   plain Elixir binaries with no wrapper struct (the same
   "raw host-language value" pattern atoms/integers/floats already use),
-  not ISO's own code-list default (see `string_type_decision`,
-  DESIGN.md). `"abc"` now unifies with `"abc"` by exact byte equality
-  and never with `[97,98,99]` or `abc` -- both structurally distinct
-  from a string. Standard order of terms gained a fourth class between
+  not ISO's own code-list default. `"abc"` now unifies with `"abc"` by
+  exact byte equality and never with `[97,98,99]` or `abc` -- both
+  structurally distinct from a string. Standard order of terms gained a fourth class between
   atom and compound (`Var < Number < Atom < String < Compound`), and a
   new `string/1` type check joins `atom/1`/`atomic/1` (the latter now
   also true for strings). Alongside it, the v0.4 atom/number/string

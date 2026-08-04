@@ -683,10 +683,10 @@ defmodule Episteme.Engine do
   end
 
   # `dcg_translate(Rule, Clause)`: the readable alias for `-->/2` itself
-  # (see `predicate_catalog` in DESIGN.md) -- unifies `Clause` with the
-  # ordinary `Head2 :- Body2` clause term `Rule` (a `Head --> Body`
-  # term) translates to, without storing anything. Exposed mainly for
-  # introspection/testing; `assert/1` and `Database.consult_forms/2`'s
+  # -- unifies `Clause` with the ordinary `Head2 :- Body2` clause term
+  # `Rule` (a `Head --> Body` term) translates to, without storing
+  # anything. Exposed mainly for introspection/testing; `assert/1` and
+  # `Database.consult_forms/2`'s
   # own `{:dcg, head, body}` form call `Episteme.Dcg.translate_rule/2`
   # directly, storing the result instead of unifying it.
   defp dcg_translate_goal(rule_arg, clause_arg, bindings) do

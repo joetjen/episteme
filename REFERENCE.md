@@ -552,8 +552,7 @@ Episteme.query(c.(:atom, [1]), Database.new())
 ### `string/1`
 
 True for a real string (see [Atom, number, and string conversions](#atom-number-and-string-conversions)
-below, and `string_type_decision` in DESIGN.md) — false for an atom
-with the same characters, or anything else. A string is never `atom/1`,
+below) — false for an atom with the same characters, or anything else. A string is never `atom/1`,
 and an atom is never `string/1`, no matter how they print.
 
 ```elixir
@@ -1283,13 +1282,13 @@ Episteme.query(c.(:maplist, [:positive, [1, -2, 3]]), positive_db)
 
 Two families, sharing one underlying idea: every predicate here reads
 or produces the *text* of an atomic term (atom, number, or a real
-string — see `string_type_decision` in DESIGN.md, and
-[`string/1`](#string1) above). The `atom_*`/`number_*` family (classic
-ISO, or long-standing de-facto library predicates) works with atoms;
-the `string_*`/`split_string` family (SWI-style) works with real
-strings instead. They're not interchangeable — `atom_chars/2` produces
-single-character *atoms*, `string_chars/2` produces single-character
-*strings*, and neither unifies with the other's output.
+string — see [`string/1`](#string1) above). The `atom_*`/`number_*`
+family (classic ISO, or long-standing de-facto library predicates)
+works with atoms; the `string_*`/`split_string` family (SWI-style)
+works with real strings instead. They're not interchangeable —
+`atom_chars/2` produces single-character *atoms*, `string_chars/2`
+produces single-character *strings*, and neither unifies with the
+other's output.
 
 ### `atom_codes/2` and `atom_chars/2`
 
