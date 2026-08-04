@@ -1,5 +1,6 @@
 defmodule Episteme.TermTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Episteme.Term
   alias Episteme.Term.Compound
@@ -88,6 +89,61 @@ defmodule Episteme.TermTest do
     test "lists compare element-wise" do
       assert Term.structurally_equal?([1, 2, 3], [1, 2, 3])
       refute Term.structurally_equal?([1, 2], [1, 2, 3])
+    end
+  end
+
+  # Ground (variable-free) terms built from atoms/integers as leaves,
+  # native lists and %Compound{} as containers -- deliberately no
+  # floats (an integer and a float at the same value are *not*
+  # structurally_equal?/2, so a leaf generator mixing both would need
+  # every property below to account for that on its own) and no
+  # variables (a fresh Term.new_var/1 in every generated sample would
+  # make "generate two terms and compare" properties meaningless, since
+  # two freshly generated variables are never structurally equal to one
+  # another no matter how the rest of the term matches).
+  defp ground_term do
+    leaf = one_of([integer(), atom(:alphanumeric)])
+
+    StreamData.tree(leaf, fn generator ->
+      one_of([
+        list_of(generator, max_length: 4),
+        map({atom(:alphanumeric), list_of(generator, max_length: 4)}, fn {name, args} ->
+          %Compound{name: name, args: args}
+        end)
+      ])
+    end)
+  end
+
+  describe "invariants over arbitrary ground terms (property-based, via stream_data)" do
+    property "structurally_equal?/2 is reflexive" do
+      check all(term <- ground_term()) do
+        assert Term.structurally_equal?(term, term)
+      end
+    end
+
+    property "resolve_deep/2 is a no-op on a ground term, regardless of the bindings passed" do
+      check all(term <- ground_term()) do
+        assert Term.resolve_deep(term, Bindings.new()) == term
+      end
+    end
+
+    property "unify/4 then resolve/3 round-trips a fresh variable to whatever ground term it was unified with" do
+      check all(term <- ground_term()) do
+        var = Term.new_var("X")
+        assert {:ok, bindings} = Bindings.unify(Term, Bindings.new(), var, term)
+        assert Bindings.resolve(Term, bindings, var) == term
+      end
+    end
+
+    property "fresh_copy/1 preserves shape and every ground (non-variable) leaf value" do
+      check all(term <- ground_term()) do
+        # `term` itself has no variables to rename, so fresh_copy/1 is
+        # the identity here -- the property that actually matters
+        # (renaming apart while preserving sharing) is exercised with
+        # example-based tests above, since it needs *shared* variable
+        # refs as input, which a ground-term generator can't produce.
+        assert Term.fresh_copy(term) == term
+      end
     end
   end
 end

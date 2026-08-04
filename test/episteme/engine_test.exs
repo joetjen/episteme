@@ -27,7 +27,7 @@ defmodule Episteme.EngineTest do
           {:fact, c(:parent, [:tom, :bob])},
           {:fact, c(:parent, [:bob, :ann])},
           {:fact, c(:parent, [:bob, :pat])},
-          {:rule, c(:grandparent, [x, z]), c(:",", [c(:parent, [x, y]), c(:parent, [y, z])])}
+          {:rule, c(:grandparent, [x, z]), c(:and, [c(:parent, [x, y]), c(:parent, [y, z])])}
         ])
 
       assert solutions(db, c(:grandparent, [:tom, var("W")])) == [
@@ -43,12 +43,10 @@ defmodule Episteme.EngineTest do
       r = var("R")
 
       body =
-        c(:";", [
-          c(:->, [c(:>, [x, 0]), c(:=, [r, :pos])]),
-          c(:";", [
-            c(:->, [c(:<, [x, 0]), c(:=, [r, :neg])]),
-            c(:=, [r, :zero])
-          ])
+        c(:if_then_else, [
+          c(:>, [x, 0]),
+          c(:unify, [r, :pos]),
+          c(:if_then_else, [c(:<, [x, 0]), c(:unify, [r, :neg]), c(:unify, [r, :zero])])
         ])
 
       db = db([{:rule, c(:sign, [x, r]), body}])
@@ -60,7 +58,7 @@ defmodule Episteme.EngineTest do
 
     test "if-then without else fails when the condition fails" do
       x = var("X")
-      db = db([{:rule, c(:t, [x]), c(:->, [c(:>, [x, 0]), true])}])
+      db = db([{:rule, c(:t, [x]), c(:if_then, [c(:>, [x, 0]), true])}])
 
       assert solutions(db, c(:t, [-1])) == []
       assert solutions(db, c(:t, [1])) == [%{}]
@@ -68,14 +66,14 @@ defmodule Episteme.EngineTest do
   end
 
   describe "negation as failure" do
-    test "\\+ succeeds when the goal has no solution, without binding anything" do
+    test "not/1 succeeds when the goal has no solution, without binding anything" do
       x1 = var("X")
       x2 = var("X")
 
       db =
         db([
           {:rule, c(:even, [x1]), c(:is, [0, c(:mod, [x1, 2])])},
-          {:rule, c(:odd, [x2]), c(:"\\+", [c(:even, [x2])])}
+          {:rule, c(:odd, [x2]), c(:not, [c(:even, [x2])])}
         ])
 
       assert solutions(db, c(:odd, [3])) == [%{}]
@@ -96,7 +94,7 @@ defmodule Episteme.EngineTest do
 
     test "arithmetic comparisons" do
       empty = db()
-      assert solutions(empty, c(:"=:=", [3, 3.0])) == [%{}]
+      assert solutions(empty, c(:numeric_equal, [3, 3.0])) == [%{}]
       assert solutions(empty, c(:<, [3, 4])) == [%{}]
       assert solutions(empty, c(:<, [4, 3])) == []
     end
@@ -114,34 +112,36 @@ defmodule Episteme.EngineTest do
       assert solutions(empty, c(:var, [:foo])) == []
     end
 
-    test "==/2 and \\==/2 respect variable identity and numeric type" do
+    test "equal/2 and not_equal/2 respect variable identity and numeric type" do
       empty = db()
       x = var("X")
-      assert solutions(empty, c(:==, [c(:foo, [x, x]), c(:foo, [1, 1])])) == []
+      assert solutions(empty, c(:equal, [c(:foo, [x, x]), c(:foo, [1, 1])])) == []
 
       x2 = var("X")
 
       goal =
-        c(:",", [c(:=, [x2, 1]), c(:==, [c(:foo, [x2, x2]), c(:foo, [1, 1])])])
+        c(:and, [c(:unify, [x2, 1]), c(:equal, [c(:foo, [x2, x2]), c(:foo, [1, 1])])])
 
       assert solutions(empty, goal) == [%{"X" => 1}]
 
-      assert solutions(empty, c(:==, [1, 1.0])) == []
-      assert solutions(empty, c(:"\\==", [1, 1.0])) == [%{}]
+      assert solutions(empty, c(:equal, [1, 1.0])) == []
+      assert solutions(empty, c(:not_equal, [1, 1.0])) == [%{}]
     end
 
-    test "=/2 unifies, \\=/2 checks non-unifiability without binding" do
+    test "unify/2 unifies, not_unify/2 checks non-unifiability without binding" do
       empty = db()
 
-      assert solutions(empty, c(:=, [var("X"), c(:foo, [1, 2])])) == [
+      assert solutions(empty, c(:unify, [var("X"), c(:foo, [1, 2])])) == [
                %{"X" => %Compound{name: :foo, args: [1, 2]}}
              ]
 
-      assert solutions(empty, c(:"\\=", [1, 2])) == [%{}]
-      # an unbound X unifies with anything, so \=/2 fails here -- it only
-      # succeeds once X is already bound to something incompatible.
-      assert solutions(empty, c(:"\\=", [var("X"), 1])) == []
-      assert solutions(empty, c(:",", [c(:=, [var("X"), 2]), c(:"\\=", [var("X"), 1])])) == []
+      assert solutions(empty, c(:not_unify, [1, 2])) == [%{}]
+      # an unbound X unifies with anything, so not_unify/2 fails here -- it
+      # only succeeds once X is already bound to something incompatible.
+      assert solutions(empty, c(:not_unify, [var("X"), 1])) == []
+
+      assert solutions(empty, c(:and, [c(:unify, [var("X"), 2]), c(:not_unify, [var("X"), 1])])) ==
+               []
     end
   end
 
@@ -151,7 +151,7 @@ defmodule Episteme.EngineTest do
       y = var("Y")
       r = var("R")
       catcher = c(:error, [var("_"), var("_")])
-      body = c(:catch, [c(:is, [r, c(:/, [x, y])]), catcher, c(:=, [r, :undefined])])
+      body = c(:catch, [c(:is, [r, c(:/, [x, y])]), catcher, c(:unify, [r, :undefined])])
       db = db([{:rule, c(:safe_div, [x, y, r]), body}])
 
       assert solutions(db, c(:safe_div, [10, 2, var("R")])) == [%{"R" => 5}]
@@ -178,6 +178,17 @@ defmodule Episteme.EngineTest do
                solutions(db(), c(:copy_term, [c(:f, [x, x]), var("Y")]))
 
       assert a.ref == b.ref
+    end
+  end
+
+  describe "partial (improper) lists in the top-level query" do
+    test "a partial list ending in a variable unifies without crashing, and reports that variable" do
+      y = var("Y")
+      assert solutions(db(), c(:unify, [[1 | y], [1, 2, 3]])) == [%{"Y" => [2, 3]}]
+    end
+
+    test "is_list/1 on a partial list ending in a non-list atom fails cleanly, not a crash" do
+      assert solutions(db(), c(:is_list, [[1 | :foo]])) == []
     end
   end
 end

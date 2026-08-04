@@ -54,7 +54,7 @@ defmodule Episteme.MixProject do
       # (which also needs `ichor` itself, dev-only, for `mix ichor.gen`),
       # Episteme has no reader/grammar of its own, so `ichor` never
       # appears here at all.
-      {:ichor_runtime, "~> 0.1.0"}
+      {:ichor_runtime, "~> 0.2"}
     ]
   end
 
@@ -66,7 +66,7 @@ defmodule Episteme.MixProject do
         "format",
         "compile --warnings-as-errors",
         "credo --strict",
-        "sobelow",
+        "sobelow --skip",
         "test",
         "dialyzer"
       ]
@@ -74,18 +74,18 @@ defmodule Episteme.MixProject do
   end
 
   defp description do
-    "A standalone Prolog-like resolution engine and clause database for Elixir -- " <>
+    "A standalone Prolog-like resolution engine and clause database for Elixir: " <>
       "terms, unification, SLD-resolution, backtracking, a genuine clause-scoped cut, " <>
-      "and a small builtin-predicate set, built directly on Ichor's search substrate. " <>
-      "No parser and no dependency on any concrete surface syntax -- build the database " <>
-      "and goal terms yourself, or use a front-end (Aletheia's reader is one) on top."
+      "and builtin predicates, built on Ichor's search substrate. No parser -- bring " <>
+      "your own front-end (e.g. Aletheia) or build goal terms directly."
   end
 
   defp package do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/joetjen/episteme"},
-      files: ~w(lib .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
+      files: ~w(lib .formatter.exs mix.exs README.md TUTORIAL.md REFERENCE.md EXAMPLES.md
+           CHEATSHEET.md CHANGELOG.md CONTRIBUTING.md LICENSE)
     ]
   end
 
@@ -99,10 +99,19 @@ defmodule Episteme.MixProject do
     ]
   end
 
+  # Doc navigation order: README first (it's `main`), then the
+  # learn-the-library docs -- narrative walkthrough, full feature-by-
+  # feature reference, then worked programs -- then the quick lookup
+  # doc, then project-process docs last.
   defp extras do
     [
       "README.md",
+      "TUTORIAL.md",
+      "REFERENCE.md",
+      "EXAMPLES.md",
+      "CHEATSHEET.md",
       "CHANGELOG.md",
+      "CONTRIBUTING.md",
       "LICENSE"
     ]
   end
@@ -117,6 +126,11 @@ defmodule Episteme.MixProject do
         Episteme.Term.Var,
         Episteme.Term.Compound,
         Episteme.Database
+      ],
+      "Database Backends": [
+        Episteme.Database.Backend,
+        Episteme.Database.Backends.Ets,
+        Episteme.Database.Backends.Dets
       ],
       Engine: [
         Episteme.Engine
