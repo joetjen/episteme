@@ -64,6 +64,10 @@ Episteme.query(%Compound{name: :grandparent, args: [tom, Term.new_var("Who")]}, 
 - **[EXAMPLES.md](EXAMPLES.md)** — complete, verified-runnable programs
   (a family tree, graph reachability, a key-value store, FizzBuzz, and
   more).
+- **[CASE_STUDY.md](CASE_STUDY.md)** — a single larger, real-world
+  worked example: a structured-log auditor combining a DCG grammar,
+  the dynamic database, and grouped aggregation, with the intent,
+  solution, and result spelled out end to end.
 - **[CHEATSHEET.md](CHEATSHEET.md)** — every predicate and Elixir-side
   function, one page, for once you know your way around ([REFERENCE.md](REFERENCE.md)
   is the page behind each row of it).

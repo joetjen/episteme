@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- [CASE_STUDY.md](CASE_STUDY.md): a single larger, real-world worked
+  example (a structured-log auditor -- parses logfmt-style lines with
+  a DCG grammar, stores them in the dynamic database, and flags
+  brute-force/credential-stuffing patterns via grouped `setof/3`
+  aggregation and `format/2` reporting), with intent, solution, and
+  result spelled out end to end, alongside the many small examples in
+  [EXAMPLES.md](EXAMPLES.md).
 - DCG (Definite Clause Grammar) support, closing out v0.5: a new
   `Episteme.Dcg` module (`translate_rule/2`, `translate_body/3`)
   translates a `Head --> Body` rule into an ordinary clause, threading
