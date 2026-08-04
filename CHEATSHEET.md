@@ -106,6 +106,7 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 | `if_then(Cond, Then)` | Like `if_then_else/3` with no `Else` — fails outright if `Cond` fails. |
 | `not(G)` | Negation as failure: succeeds iff `G` has no solutions. Binds nothing. |
 | `once(G)` | Commits to `G`'s first solution. |
+| `ignore(G)` | Like `once/1`, but never fails -- succeeds unchanged if `G` has no solution. |
 | `call(G, Extra...)` | Calls `G` with `Extra` args appended; cut-opaque. |
 | `findall(Template, G, List)` | Collects `Template` for every solution of `G` into `List` (`[]` if none). Cut-opaque, binds nothing else. |
 | `forall(Cond, Action)` | Succeeds iff every solution of `Cond` has a solution of `Action`. Cut-opaque, binds nothing. |
@@ -116,6 +117,7 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 |---|---|
 | `unify(A, B)` | Unify. |
 | `not_unify(A, B)` | Succeeds iff `A` and `B` do *not* unify (binds nothing). |
+| `unify_with_occurs_check(A, B)` | Like `unify/2`, but fails instead of building a self-referential/infinite term. |
 | `equal(A, B)` | Structural equality on already-resolved terms (`equal(1, 1.0)` is false). |
 | `not_equal(A, B)` | Structural inequality. |
 | `order_less(A, B)`, `order_greater(A, B)` | Standard order of terms: `Var < Number < Atom < Compound` (real Prolog `@<`, `@>`). |

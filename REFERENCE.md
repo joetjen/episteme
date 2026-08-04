@@ -28,12 +28,13 @@ c = fn name, args -> %Compound{name: name, args: args} end
 ## Contents
 
 - [Control constructs](#control-constructs) — `true`, `fail`/`false`,
-  `cut`, `and`, `or`, `if_then`/`if_then_else`, `not`, `once`, `call`,
-  `findall`, `forall`
+  `cut`, `and`, `or`, `if_then`/`if_then_else`, `not`, `once`, `ignore`,
+  `call`, `findall`, `forall`
 - [Matching and comparing values](#matching-and-comparing-values) —
-  `unify`, `not_unify`, `equal`, `not_equal`, standard order of terms
-  (`order_less`, `order_greater`, `order_less_or_equal`,
-  `order_greater_or_equal`, `compare`), `copy_term`
+  `unify`, `not_unify`, `unify_with_occurs_check`, `equal`, `not_equal`,
+  standard order of terms (`order_less`, `order_greater`,
+  `order_less_or_equal`, `order_greater_or_equal`, `compare`),
+  `copy_term`
 - [Type checks](#type-checks) — `var`, `nonvar`, `atom`, `atomic`,
   `number`, `integer`, `float`, `compound`, `callable`, `is_list`,
   `ground`
@@ -242,6 +243,22 @@ Contrast with a plain `member(X, [1,2,3])`, which would give three
 answers (`X = 1`, `X = 2`, `X = 3`) — `once/1` throws the other two away
 before you ever see them.
 
+### `ignore/1`
+
+Like `once/1` -- commits to `Goal`'s first solution -- but never fails:
+if `Goal` has no solution, `ignore/1` still succeeds, with the bindings
+left exactly as they were beforehand. Cut-opaque, same as `once/1`.
+Equivalent to `(call(Goal) -> true ; true)`.
+
+```elixir
+Episteme.query(c.(:ignore, [:fail]), Database.new())
+#=> {:ok, [%{}]}
+```
+
+Useful for a side-effecting goal (asserting a fact, printing something)
+you want to attempt without aborting the rest of a conjunction if it
+happens to fail.
+
 ### `call/N`
 
 `call(Goal, Extra1, Extra2, ...)` runs `Goal` with the extra arguments
@@ -340,6 +357,23 @@ Episteme.query(c.(:not_unify, [1, 2]), Database.new())
 
 Episteme.query(c.(:not_unify, [1, 1]), Database.new())
 #=> {:ok, []}
+```
+
+### `unify_with_occurs_check/2`
+
+Like `unify/2`, but with an occurs-check: a variable is never allowed to
+bind to a compound term that already contains it, which `unify/2` would
+otherwise accept, silently building an infinite term (`X = f(X)`). ISO
+Prolog's `=/2` has no occurs-check by default -- this is the explicit,
+opt-in safe variant.
+
+```elixir
+x = Term.new_var("X")
+Episteme.query(c.(:unify_with_occurs_check, [x, c.(:f, [x])]), Database.new())
+#=> {:ok, []}
+
+Episteme.query(c.(:unify_with_occurs_check, [Term.new_var("X"), c.(:foo, [1, 2])]), Database.new())
+#=> {:ok, [%{"X" => %Episteme.Term.Compound{name: :foo, args: [1, 2]}}]}
 ```
 
 ### `equal/2` — structural equality (real Prolog: `==`)

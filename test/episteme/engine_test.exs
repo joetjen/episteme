@@ -81,6 +81,18 @@ defmodule Episteme.EngineTest do
     end
   end
 
+  describe "ignore/1" do
+    test "commits to the goal's first solution, like once/1, when it has one" do
+      db = db([{:fact, c(:fruit, [:apple])}, {:fact, c(:fruit, [:pear])}])
+
+      assert solutions(db, c(:ignore, [c(:fruit, [var("X")])])) == [%{"X" => :apple}]
+    end
+
+    test "still succeeds, with no bindings, when the goal has no solution" do
+      assert solutions(db(), c(:ignore, [:fail])) == [%{}]
+    end
+  end
+
   describe "arithmetic" do
     test "is/2 and standard precedence" do
       empty = db()
@@ -142,6 +154,21 @@ defmodule Episteme.EngineTest do
 
       assert solutions(empty, c(:and, [c(:unify, [var("X"), 2]), c(:not_unify, [var("X"), 1])])) ==
                []
+    end
+
+    test "unify_with_occurs_check/2 rejects a variable binding to a term containing itself" do
+      empty = db()
+      x = var("X")
+
+      # Unlike plain unify/2 (which has no occurs-check and would happily
+      # build the self-referential/infinite term X = f(X), left untested
+      # here since even inspecting such a binding walks it forever), this
+      # case must fail outright.
+      assert solutions(empty, c(:unify_with_occurs_check, [x, c(:f, [x])])) == []
+
+      assert solutions(empty, c(:unify_with_occurs_check, [var("X"), c(:foo, [1, 2])])) == [
+               %{"X" => %Compound{name: :foo, args: [1, 2]}}
+             ]
     end
   end
 
