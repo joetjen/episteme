@@ -8,9 +8,13 @@ defmodule Episteme.Database do
   `abolish`/`dynamic` dispatch. Populated either directly (`add_clause/2`/`add_fact/2`,
   building terms yourself with `Episteme.Term`) or via `consult_forms/2`,
   for any front-end that parses its own surface syntax into
-  `{:fact, _}`/`{:rule, _, _}` forms (Aletheia's reader is one such
-  front-end, but this module has no dependency on it or any particular
-  concrete syntax).
+  `{:fact, _}`/`{:rule, _, _}`/`{:dcg, _, _}` forms (Aletheia's reader
+  is one such front-end, but this module has no dependency on it or
+  any particular concrete syntax). A `{:dcg, head, body}` form is a
+  DCG rule (`Head --> Body`) -- translated via `Episteme.Dcg.translate_rule/2`
+  into an ordinary clause before storage, same as `assert/1`
+  (`Episteme.Engine`) does for a `-->/2`-shaped clause term asserted
+  directly.
 
   Storage itself is pluggable via `Episteme.Database.Backend`: `new/1`
   defaults to `Episteme.Database.Backends.Ets` (in-memory, indexed by
@@ -125,16 +129,19 @@ defmodule Episteme.Database do
   def indicator(atom) when is_atom(atom), do: {atom, 0}
 
   @doc """
-  Loads every `{:fact, head}`/`{:rule, head, body}` form into `db`.
-  `{:directive, _}` forms are ignored here -- a front-end reader's own
-  directives (an `op/3` table mutation, say) are that front-end's
-  concern, not the database's.
+  Loads every `{:fact, head}`/`{:rule, head, body}`/`{:dcg, head, body}`
+  form into `db` -- the latter a DCG rule (`Head --> Body`), translated
+  via `Episteme.Dcg.translate_rule/2` before storage. `{:directive, _}`
+  forms are ignored here -- a front-end reader's own directives (an
+  `op/3` table mutation, say) are that front-end's concern, not the
+  database's.
   """
   @spec consult_forms(t(), list()) :: t()
   def consult_forms(db, forms) do
     Enum.reduce(forms, db, fn
       {:fact, head}, db -> add_fact(db, head)
       {:rule, head, body}, db -> add_clause(db, {head, body})
+      {:dcg, head, body}, db -> add_clause(db, Episteme.Dcg.translate_rule(head, body))
       {:directive, _goal}, db -> db
     end)
   end

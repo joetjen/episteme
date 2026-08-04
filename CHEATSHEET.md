@@ -293,6 +293,23 @@ front-end reader is where that would live.
 `~i` (skip an argument), `~n` (newline), `~~` (literal `~`). No
 column/radix directives (`~t`, `~|`, `~Nr`, numeric-prefixed `~Nd`).
 
+## DCG (Definite Clause Grammars)
+
+`Head --> Body` threads an incoming/outgoing difference-list pair
+(`S0`/`S`) through every nonterminal call. `Episteme.Dcg` does the
+translation; practical subset only -- terminals (`[t1,...,tn]`),
+`{Goal}` (embedded plain goal, no list threading), `cut`, `and`, `or`,
+`if_then`, `if_then_else`, `not`, a bare nonterminal (atom/compound),
+a variable body (`phrase(Var, S0, S)`). No `call//N` pushback.
+
+| Goal / form | Meaning |
+|---|---|
+| `phrase(Body, List)` | Translates `Body`, calls it with `List` as input and `[]` as output (must consume all of `List`). Cut-opaque. |
+| `phrase(Body, List, Rest)` | Same, but leaves whatever's unconsumed in `Rest`. |
+| `dcg_translate(Rule, Clause)` | Unifies `Clause` with the ordinary clause `Rule` (a `Head --> Body` term) translates to -- no storage. |
+| `{:dcg, head, body}` (`Database.consult_forms/2`) | Translates and stores, like `{:rule, head, body}` but for a DCG rule. |
+| `assert((Head --> Body))` | Same translation, applied to a `-->/2`-shaped clause term (same as `:-/2` is already special-cased). |
+
 ## `Episteme.Term` (Elixir side)
 
 | Function | Meaning |

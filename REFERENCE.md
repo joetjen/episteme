@@ -59,6 +59,8 @@ c = fn name, args -> %Compound{name: name, args: args} end
   `string_to_atom`, `string_concat`, `string_chars`, `string_codes`,
   `string_length`, `number_string`, `split_string`
 - [I/O](#io) — `write`, `writeln`, `print`, `nl`, `format`
+- [DCG (Definite Clause Grammars)](#dcg-definite-clause-grammars) —
+  `phrase`, `dcg_translate`, asserting a DCG rule dynamically
 
 A note before diving in: every goal name below is a plain English word
 (`and`, `or`, `unify`, ...), not real Prolog's punctuation operator
@@ -1546,3 +1548,94 @@ Episteme.query(c.(:format, ["codes: ~s", [[104, 105]]]), Database.new())
 Running out of `Args` for a directive that needs one raises
 `domain_error(format_arguments, [])`; an unrecognized `~`-directive
 raises `domain_error(format_directive, Char)`.
+
+---
+
+## DCG (Definite Clause Grammars)
+
+A DCG rule (`Head --> Body`) is a shorthand for an ordinary clause that
+threads an extra pair of arguments -- an incoming list (`S0`) and an
+outgoing one (`S`) -- through every nonterminal call, so a grammar
+reads like a sequence of things matched/consumed rather than explicit
+list-splitting. `Episteme.Dcg.translate_rule/2`/`translate_body/3` do
+the actual translation; `dcg_translate/2`, a `{:dcg, head, body}`
+`Episteme.Database.consult_forms/2` form, and DCG-rule support in
+`assert/1` (a `-->/2`-shaped clause term, same as `:-/2` is already
+special-cased) all build on it, and `phrase/2,3` is how you *run* a
+DCG body (stored or not) as an ordinary goal.
+
+A practical subset of real DCG translation, not all of it: terminals
+(`[t1, ..., tn]`), an embedded plain goal (`{Goal}`, ISO's own `'{}'/1`
+term shape -- runs `Goal` without touching the list), `cut`, `and/2`,
+`or/2`, `if_then/2`, `if_then_else/3`, `not/1`, a bare nonterminal
+(atom or compound, any other name -- gets `S0`/`S` appended), and a
+variable body (translated to `phrase(Var, S0, S)`, so a grammar body
+can be decided at call time). No `call//N` pushback support
+(parameterized higher-order nonterminals).
+
+### `phrase/2` and `phrase/3`
+
+`phrase(Body, List)` translates `Body` and calls it with `List` as the
+incoming difference-list and `[]` as the outgoing one -- i.e. `Body`
+must consume *all* of `List`. `phrase(Body, List, Rest)` instead
+leaves whatever `Body` didn't consume in `Rest`. Cut-opaque, same as
+`call/N`. `Body` itself must already be bound -- see the note on
+`Episteme.Dcg`'s own variable-body translation above.
+
+```elixir
+db =
+  Database.new()
+  |> Database.consult_forms([{:dcg, c.(:greeting, []), c.(:and, [[:hello], [:world]])}])
+
+Episteme.query(c.(:phrase, [:greeting, [:hello, :world]]), db)
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:phrase, [:greeting, [:hello, :world, :extra], Term.new_var("Rest")]), db)
+#=> {:ok, [%{"Rest" => [:extra]}]}
+```
+
+A nonterminal can take its own arguments and embed an ordinary goal via
+`{}/1` -- here, `digit(D) --> [D], {integer(D)}.`:
+
+```elixir
+d = Term.new_var("D")
+
+digit_db =
+  Database.new()
+  |> Database.consult_forms([
+    {:dcg, c.(:digit, [d]), c.(:and, [[d], %Compound{name: :{}, args: [c.(:integer, [d])]}])}
+  ])
+
+Episteme.query(c.(:phrase, [c.(:digit, [Term.new_var("X")]), [5]]), digit_db)
+#=> {:ok, [%{"X" => 5}]}
+```
+
+### `dcg_translate/2`
+
+The readable alias for `-->/2` itself: `dcg_translate(Rule, Clause)`
+unifies `Clause` with the ordinary `Head2 :- Body2` clause term `Rule`
+(a `Head --> Body` term) translates to, without storing anything --
+mainly for introspection. `assert/1` and `Database.consult_forms/2`'s
+own `{:dcg, head, body}` form call `Episteme.Dcg.translate_rule/2`
+directly instead, storing the result rather than unifying it.
+
+```elixir
+Episteme.query(
+  c.(:dcg_translate, [c.(:"-->", [:greeting, [:hello]]), Term.new_var("Clause")]),
+  Database.new()
+)
+#=> {:ok, [%{"Clause" => %Episteme.Term.Compound{name: :":-", args: [greeting(S0, S), unify(S0, [:hello | S])]}}]}
+#   (shown as Prolog-ish text for the two fresh S0/S variables here; the
+#   real value has %Episteme.Term.Var{} structs in their place)
+```
+
+### Asserting a DCG rule dynamically
+
+A `-->/2`-shaped clause term passed to `assert/1` (or `asserta/1`/
+`assertz/1`) is translated exactly like a `{:dcg, head, body}`
+`consult_forms/2` entry, before storage:
+
+```elixir
+rule = c.(:"-->", [c.(:ab, []), c.(:and, [[:a], [:b]])])
+{:ok, [%{}]} = Episteme.query(c.(:assert, [rule]), Database.new())
+```
