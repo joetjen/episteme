@@ -5,7 +5,7 @@ defmodule Episteme.Engine do
   over a predicate's clauses in declared order, subgoal sequencing is
   `conjunction/2`, both reused unmodified from Ichor. Control constructs
   (`and`, `or`, `if_then`/`if_then_else`, `cut`, `not/1`, `call/N`,
-  `once/1`) live directly here rather than in a separate builtins
+  `once/1`, `ignore/1`) live directly here rather than in a separate builtins
   module: they turned out, once actually implemented, to be inseparable
   from the cut-barrier machinery below, not independent predicates
   dispatchable through a generic table. Every one of these is a plain
@@ -154,6 +154,10 @@ defmodule Episteme.Engine do
     guard_cut(goal(built, db, inner_barrier).(bindings), inner_barrier)
   end
 
+  defp dispatch(%Compound{name: :ignore, args: [g]}, bindings, db, _barrier) do
+    ignore_goal(g, bindings, db)
+  end
+
   # -- solution aggregation --
 
   defp dispatch(%Compound{name: :findall, args: [template, g, result]}, bindings, db, _barrier) do
@@ -198,6 +202,18 @@ defmodule Episteme.Engine do
     case Bindings.unify(Term, bindings, a, b) do
       {:ok, _} -> Tree.fail().(bindings)
       :fail -> Tree.unit().(bindings)
+    end
+  end
+
+  defp dispatch(
+         %Compound{name: :unify_with_occurs_check, args: [a, b]},
+         bindings,
+         _db,
+         _barrier
+       ) do
+    case Bindings.unify_occurs_check(Term, bindings, a, b) do
+      {:ok, extended} -> Tree.unit().(extended)
+      :fail -> Tree.fail().(bindings)
     end
   end
 
@@ -590,6 +606,20 @@ defmodule Episteme.Engine do
 
     case Tree.next(stream) do
       {:solution, _bindings, _rest} -> Tree.fail().(bindings)
+      :empty -> Tree.unit().(bindings)
+    end
+  end
+
+  # `ignore(Goal)` <-> `(call(Goal) -> true ; true)`: commits to `Goal`'s
+  # first solution like `once/1`, but never fails -- if `Goal` has no
+  # solution, still succeeds, with `bindings` left exactly as they were.
+  # Cut-opaque, same as `once/1`.
+  defp ignore_goal(g, bindings, db) do
+    inner_barrier = make_ref()
+    stream = guard_cut(goal(g, db, inner_barrier).(bindings), inner_barrier)
+
+    case Tree.next(stream) do
+      {:solution, sol_bindings, _rest} -> Tree.unit().(sol_bindings)
       :empty -> Tree.unit().(bindings)
     end
   end

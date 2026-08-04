@@ -47,6 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decomposing an already-bound term, or building a fresh one from a
   name/arity or `[Name | Args]` list. See
   [REFERENCE.md](REFERENCE.md#term-construction-and-inspection).
+- Closes out the v0.2 predicate catalog: `ignore/1` (like `once/1`, but
+  never fails — succeeds with bindings unchanged if the goal has no
+  solution; equivalent to `(call(Goal) -> true ; true)`) and
+  `unify_with_occurs_check/2` (like `unify/2`, but rejects a variable
+  binding to a compound term that already contains it, instead of
+  silently building an infinite term — built on
+  `Ichor.Backtrack.Bindings.unify_occurs_check/4`, already present in
+  `ichor_runtime` but not previously wired up as a callable goal). See
+  [REFERENCE.md](REFERENCE.md#ignore1) and
+  [REFERENCE.md](REFERENCE.md#unify_with_occurs_check2).
 
 ## [0.1.0] - 2026-08-04
 
