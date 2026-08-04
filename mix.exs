@@ -83,7 +83,10 @@ defmodule Episteme.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/joetjen/episteme"},
+      links: %{
+        "GitHub" => "https://github.com/joetjen/episteme",
+        "Docs" => "https://joetjen.github.io/episteme"
+      },
       files: ~w(lib .formatter.exs mix.exs README.md TUTORIAL.md REFERENCE.md EXAMPLES.md
            CHEATSHEET.md CHANGELOG.md CONTRIBUTING.md LICENSE)
     ]
@@ -94,6 +97,7 @@ defmodule Episteme.MixProject do
       main: "readme",
       source_url: "https://github.com/joetjen/episteme",
       source_ref: "v#{@version}",
+      homepage_url: "https://joetjen.github.io/episteme",
       extras: extras(),
       groups_for_modules: groups_for_modules()
     ]

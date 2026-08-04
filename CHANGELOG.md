@@ -71,7 +71,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `msort/2`/`sort/2`, replacing what used to be private duplicate logic
   in `Episteme.Builtins.Lists`). See
   [REFERENCE.md](REFERENCE.md#bagof3-and-setof3).
-
+- Published API docs to GitHub Pages at
+  [joetjen.github.io/episteme](https://joetjen.github.io/episteme),
+  rebuilt on every push to `main` via `.github/workflows/docs.yml`.
+  Referenced from `mix.exs` (`docs: [homepage_url: ...]`,
+  `package: [links: %{"Docs" => ...}]`) and linked from the README.
 - Rounds out the dynamic-database family: `abolish/1` (unlike
   `retractall/1`, undefines the predicate too -- a later call raises
   `existence_error` again) and `dynamic/1` (declares a predicate
