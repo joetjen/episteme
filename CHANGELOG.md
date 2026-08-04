@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Standard order of terms: `order_less/2`, `order_greater/2`,
+  `order_less_or_equal/2`, `order_greater_or_equal/2` (real Prolog
+  `@<`, `@>`, `@=<`, `@>=`), and `compare/3` (already a plain word in
+  ISO, so it keeps its name). A total order over every term (`Var <
+  Number < Atom < Compound`), not just numbers — see
+  [REFERENCE.md](REFERENCE.md#matching-and-comparing-values) for the
+  full within-class ordering rules (float-before-int on equal value,
+  alphabetical atoms, arity-then-name-then-args for compounds).
+  `Episteme.Term.compare_order/2` is the underlying whole-term
+  operation, alongside `structurally_equal?/2` and `resolve_deep/2`.
 - Term construction and inspection: `functor/3`, `arg/3`, `univ/2`
   (real Prolog `=..`), and `ground/1` (alongside the existing type
   checks). `functor/3` and `univ/2` both work in either direction —

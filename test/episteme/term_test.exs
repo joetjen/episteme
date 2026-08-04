@@ -83,6 +83,75 @@ defmodule Episteme.TermTest do
     end
   end
 
+  describe "compare_order/2 (ISO standard order of terms: Var < Number < Atom < Compound)" do
+    test "a variable orders before any number, atom, or compound" do
+      x = Term.new_var("X")
+      assert Term.compare_order(x, 0) == :lt
+      assert Term.compare_order(x, :a) == :lt
+      assert Term.compare_order(x, %Compound{name: :f, args: [1]}) == :lt
+    end
+
+    test "a number orders before any atom or compound" do
+      assert Term.compare_order(0, :a) == :lt
+      assert Term.compare_order(999_999, %Compound{name: :a, args: [1]}) == :lt
+    end
+
+    test "an atom orders before any compound, [] included" do
+      assert Term.compare_order(:zzz, %Compound{name: :a, args: [1]}) == :lt
+      assert Term.compare_order([], %Compound{name: :a, args: [1]}) == :lt
+    end
+
+    test "numbers compare by value; equal value sorts float before integer" do
+      assert Term.compare_order(1, 2) == :lt
+      assert Term.compare_order(2, 1) == :gt
+      assert Term.compare_order(1.0, 1) == :lt
+      assert Term.compare_order(1, 1.0) == :gt
+    end
+
+    test "atoms compare alphabetically, [] sorting as if its name were the string \"[]\"" do
+      assert Term.compare_order(:abc, :abd) == :lt
+      assert Term.compare_order(:b, :a) == :gt
+      assert Term.compare_order([], :zzz) == :lt
+      assert Term.compare_order([], :!) == :gt
+    end
+
+    test "compounds compare by arity first, regardless of name" do
+      assert Term.compare_order(%Compound{name: :z, args: [1]}, %Compound{name: :a, args: [1, 2]}) ==
+               :lt
+    end
+
+    test "same arity: compounds compare by functor name next" do
+      assert Term.compare_order(%Compound{name: :a, args: [1]}, %Compound{name: :b, args: [1]}) ==
+               :lt
+    end
+
+    test "same arity and name: compounds compare argument-by-argument, left to right" do
+      assert Term.compare_order(%Compound{name: :f, args: [1, 2]}, %Compound{
+               name: :f,
+               args: [1, 3]
+             }) ==
+               :lt
+
+      assert Term.compare_order(%Compound{name: :f, args: [2, 1]}, %Compound{
+               name: :f,
+               args: [1, 3]
+             }) ==
+               :gt
+    end
+
+    test "a non-empty list compares via the './2' cons functor, same as a compound" do
+      assert Term.compare_order([1, 2], [1, 3]) == :lt
+      assert Term.compare_order([1], [1, 2]) == :lt
+    end
+
+    test "two distinct unbound variables order consistently but arbitrarily" do
+      x = Term.new_var("X")
+      y = Term.new_var("Y")
+      assert Term.compare_order(x, y) in [:lt, :gt]
+      assert Term.compare_order(x, y) == invert(Term.compare_order(y, x))
+    end
+  end
+
   describe "structurally_equal?/2" do
     test "same shape and value is equal" do
       assert Term.structurally_equal?(%Compound{name: :f, args: [1, :a]}, %Compound{
@@ -127,6 +196,10 @@ defmodule Episteme.TermTest do
     end)
   end
 
+  defp invert(:lt), do: :gt
+  defp invert(:gt), do: :lt
+  defp invert(:eq), do: :eq
+
   describe "invariants over arbitrary ground terms (property-based, via stream_data)" do
     property "structurally_equal?/2 is reflexive" do
       check all(term <- ground_term()) do
@@ -162,6 +235,24 @@ defmodule Episteme.TermTest do
     property "ground?/1 is true for every arbitrary ground term, by construction" do
       check all(term <- ground_term()) do
         assert Term.ground?(term)
+      end
+    end
+
+    property "compare_order/2 is reflexive" do
+      check all(term <- ground_term()) do
+        assert Term.compare_order(term, term) == :eq
+      end
+    end
+
+    property "compare_order/2 is antisymmetric" do
+      check all(a <- ground_term(), b <- ground_term()) do
+        assert Term.compare_order(a, b) == invert(Term.compare_order(b, a))
+      end
+    end
+
+    property "compare_order/2 agrees with structurally_equal?/2 on when two terms are equal" do
+      check all(a <- ground_term(), b <- ground_term()) do
+        assert Term.compare_order(a, b) == :eq == Term.structurally_equal?(a, b)
       end
     end
   end
