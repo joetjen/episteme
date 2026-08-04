@@ -189,6 +189,15 @@ defmodule Episteme.EngineTest do
       assert {:error, _} = solutions(db(), c(:throw, [:my_error]))
     end
 
+    test "existence_error/2, called directly as a goal, throws the same shape it's raised with automatically" do
+      indicator = c(:/, [:foo, 2])
+
+      assert {:error, %Compound{name: :error, args: [formal, _]}} =
+               solutions(db(), c(:existence_error, [:procedure, indicator]))
+
+      assert %Compound{name: :existence_error, args: [:procedure, ^indicator]} = formal
+    end
+
     test "calling an undefined predicate raises existence_error" do
       assert {:error, %Compound{name: :error, args: [formal, _]}} =
                solutions(db(), c(:nonexistent_pred, [1, 2]))
