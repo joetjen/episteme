@@ -12,7 +12,7 @@ defmodule Episteme.Dcg do
 
   Deliberately a practical subset of real DCG translation, not all of
   it: terminals (`[t1, ..., tn]`), embedded plain goals (`{Goal}`, ISO's
-  own `'{}'/1` term shape), `cut`, `and/2`, `or/2`, `if_then/2`,
+  own `{}`/1 term shape), `cut`, `and/2`, `or/2`, `if_then/2`,
   `if_then_else/3`, `not/1`, a bare nonterminal (atom or compound, any
   other name), and a variable body (translated to `phrase(Var, S0, S)`,
   letting a grammar body be decided at call time). No `call//N`

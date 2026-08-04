@@ -90,8 +90,10 @@ Common types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
   commit: [README.md](README.md) for anything about how the library
   fits together, [TUTORIAL.md](TUTORIAL.md) if it changes how someone
   learns the library, [EXAMPLES.md](EXAMPLES.md) if it changes how a
-  worked example behaves, [CHEATSHEET.md](CHEATSHEET.md) for a new or
-  changed predicate/function. If you add a code example to any doc,
+  worked example behaves, [CASE_STUDY.md](CASE_STUDY.md) if it changes
+  a predicate the log-auditor example depends on,
+  [CHEATSHEET.md](CHEATSHEET.md) for a new or changed
+  predicate/function. If you add a code example to any doc,
   actually run it (`mix run` a scratch script, or `iex -S mix`) before
   committing it — a plausible-looking Prolog example that was never
   executed is exactly how a doc bug gets shipped; solution-map ordering

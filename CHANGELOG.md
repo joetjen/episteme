@@ -9,12 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- [CASE_STUDY.md](CASE_STUDY.md): a single larger, real-world worked
+  example (a structured-log auditor -- parses logfmt-style lines with
+  a DCG grammar, stores them in the dynamic database, and flags
+  brute-force/credential-stuffing patterns via grouped `setof/3`
+  aggregation and `format/2` reporting), with intent, solution, and
+  result spelled out end to end, alongside the many small examples in
+  [EXAMPLES.md](EXAMPLES.md).
 - DCG (Definite Clause Grammar) support, closing out v0.5: a new
   `Episteme.Dcg` module (`translate_rule/2`, `translate_body/3`)
   translates a `Head --> Body` rule into an ordinary clause, threading
   an incoming/outgoing difference-list pair through every nonterminal
   call. A practical subset of real DCG translation -- terminals,
-  `{Goal}` (ISO's own `'{}'/1` embedded-goal shape), `cut`, `and/2`,
+  `{Goal}` (ISO's own `{}`/1 embedded-goal shape), `cut`, `and/2`,
   `or/2`, `if_then/2`, `if_then_else/3`, `not/1`, a bare nonterminal,
   and a variable body (`phrase(Var, S0, S)`) -- deliberately not all of
   it (no `call//N` pushback). `phrase/2,3` (`Episteme.Engine`) runs a
@@ -37,10 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A real string type -- a genuinely new atomic term class, backed by
   plain Elixir binaries with no wrapper struct (the same
   "raw host-language value" pattern atoms/integers/floats already use),
-  not ISO's own code-list default (see `string_type_decision`,
-  DESIGN.md). `"abc"` now unifies with `"abc"` by exact byte equality
-  and never with `[97,98,99]` or `abc` -- both structurally distinct
-  from a string. Standard order of terms gained a fourth class between
+  not ISO's own code-list default. `"abc"` now unifies with `"abc"` by
+  exact byte equality and never with `[97,98,99]` or `abc` -- both
+  structurally distinct from a string. Standard order of terms gained a fourth class between
   atom and compound (`Var < Number < Atom < String < Compound`), and a
   new `string/1` type check joins `atom/1`/`atomic/1` (the latter now
   also true for strings). Alongside it, the v0.4 atom/number/string
@@ -71,7 +77,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `msort/2`/`sort/2`, replacing what used to be private duplicate logic
   in `Episteme.Builtins.Lists`). See
   [REFERENCE.md](REFERENCE.md#bagof3-and-setof3).
-
+- Published API docs to GitHub Pages at
+  [joetjen.github.io/episteme](https://joetjen.github.io/episteme),
+  rebuilt on every push to `main` via `.github/workflows/docs.yml`.
+  Referenced from `mix.exs` (`docs: [homepage_url: ...]`,
+  `package: [links: %{"Docs" => ...}]`) and linked from the README.
 - Rounds out the dynamic-database family: `abolish/1` (unlike
   `retractall/1`, undefines the predicate too -- a later call raises
   `existence_error` again) and `dynamic/1` (declares a predicate

@@ -6,8 +6,8 @@ defmodule Episteme.Builtins.Strings do
   (classic ISO/de-facto predicates, working over atoms) plus
   `atom_string/2 string_to_atom/2 string_concat/3 string_chars/2
   string_codes/2 string_length/2 number_string/2 split_string/4`
-  (SWI-style predicates producing/consuming real strings -- see
-  `string_type_decision`, DESIGN.md), all built on the shared
+  (SWI-style predicates producing/consuming real strings), all built
+  on the shared
   `atomic_text/1`/`require_atomic_text/2` "coerce an atomic term (atom,
   number, or real string) to its text" primitive. `string/1`'s own type
   check lives in `Episteme.Engine` directly, alongside every other type
@@ -94,10 +94,10 @@ defmodule Episteme.Builtins.Strings do
   # This whole module's job is building Prolog atoms out of
   # caller-supplied text (splitting/concatenating/case-converting
   # atoms, parsing codes/chars lists, ...) -- the BEAM atom table isn't
-  # garbage collected, so this is the exact same accepted risk DESIGN.md
-  # already documents as `atom-table-exhaustion` for the reader itself
-  # (raw BEAM atoms are fine for a library embedded in trusted programs,
-  # v0.1-v0.5; revisit before any untrusted-input use case). Routing
+  # garbage collected, so this carries the same atom-table-exhaustion
+  # risk as the reader itself (raw BEAM atoms are fine for a library
+  # embedded in trusted programs, v0.1-v0.5; revisit before any
+  # untrusted-input use case). Routing
   # every `String.to_atom/1` call in this module through here, instead
   # of each of the dozen call sites calling it directly, keeps that
   # justification in one place instead of a skip comment repeated a
@@ -415,7 +415,7 @@ defmodule Episteme.Builtins.Strings do
 
   defp text_to_char_atoms(text), do: text |> String.graphemes() |> Enum.map(&to_prolog_atom/1)
 
-  # ---- string_* family (real strings -- see string_type_decision) -----------
+  # ---- string_* family (real strings) -----------
 
   defp atom_string_goal(atom_arg, string_arg, bindings) do
     case Bindings.resolve(Term, bindings, atom_arg) do
