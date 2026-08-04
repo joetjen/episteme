@@ -134,6 +134,15 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 | `compound(X)` | A `%Compound{}` or a non-empty list. |
 | `callable(X)` | An atom, `%Compound{}`, or non-empty list. |
 | `is_list(X)` | A proper (nil-terminated) list. |
+| `ground(X)` | No unbound variable anywhere in `X`, at any depth. |
+
+## Term construction and inspection
+
+| Goal | Meaning |
+|---|---|
+| `functor(Term, Name, Arity)` | `Term` bound: decomposes it. `Term` unbound: builds it from `Name`/`Arity` (`Arity` 0 unifies `Term` with `Name`; `Arity` > 0 needs an atom `Name`, builds fresh-variable args). |
+| `arg(N, Term, Arg)` | `Arg` is `Term`'s `N`th argument, 1-based. Out of range fails, not an error. |
+| `univ(Term, List)` | Real Prolog `=..`. `Term` bound: `List` = `[Name \| Args]` (or `[Term]` if atomic). `Term` unbound: builds `Term` from a fully-instantiated `List`. |
 
 ## Arithmetic
 

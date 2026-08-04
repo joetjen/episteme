@@ -33,7 +33,10 @@ c = fn name, args -> %Compound{name: name, args: args} end
 - [Matching and comparing values](#matching-and-comparing-values) —
   `unify`, `not_unify`, `equal`, `not_equal`, `copy_term`
 - [Type checks](#type-checks) — `var`, `nonvar`, `atom`, `atomic`,
-  `number`, `integer`, `float`, `compound`, `callable`, `is_list`
+  `number`, `integer`, `float`, `compound`, `callable`, `is_list`,
+  `ground`
+- [Term construction and inspection](#term-construction-and-inspection)
+  — `functor`, `arg`, `univ`
 - [Arithmetic](#arithmetic) — `is`, comparisons, `between`, every
   evaluable functor
 - [Exceptions](#exceptions) — `throw`, `catch`, `type_error`,
@@ -495,6 +498,97 @@ Episteme.query(c.(:is_list, [[1, 2, 3]]), Database.new())
 Episteme.query(c.(:is_list, [:foo]), Database.new())
 #=> {:ok, []}
 ```
+
+---
+
+### `ground/1`
+
+True iff `Term` contains no unbound variable anywhere, at any depth —
+resolves deeply first, so a variable that's already bound to a ground
+term counts as ground too.
+
+```elixir
+Episteme.query(c.(:ground, [c.(:f, [1, [2, 3]])]), Database.new())
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:ground, [c.(:f, [1, Term.new_var("X")])]), Database.new())
+#=> {:ok, []}
+```
+
+---
+
+## Term construction and inspection
+
+### `functor/3`
+
+`functor(Term, Name, Arity)` relates a term to its outermost
+name/arity, and works in both directions:
+
+- **`Term` bound** — decomposes it. A compound gives its own name and
+  argument count; an atomic term (atom or number) gives itself as
+  `Name` with `Arity` 0. A non-empty list decomposes via the same
+  `'.'/2` cons functor `Term.compound?/1` uses everywhere else (`Name`
+  = `.`, `Arity` = 2); `[]` is atomic, same as any other atom.
+- **`Term` unbound** — builds a fresh term from `Name`/`Arity` instead.
+  `Arity` 0 just unifies `Term` with `Name` as-is (whatever atomic
+  value it is); `Arity` > 0 requires `Name` to be an atom and builds a
+  compound of that many brand-new, independent variables.
+
+```elixir
+Episteme.query(
+  c.(:functor, [c.(:foo, [:a, :b, :c]), Term.new_var("F"), Term.new_var("A")]),
+  Database.new()
+)
+#=> {:ok, [%{"A" => 3, "F" => :foo}]}
+
+Episteme.query(c.(:functor, [Term.new_var("T"), :foo, 2]), Database.new())
+#=> one answer: "T" is a fresh foo(A, B), A and B independent fresh variables
+```
+
+A non-atom `Name` with `Arity` > 0 raises `type_error(atom, Name)`; an
+unbound `Term` with an unbound `Name` or `Arity` raises
+`instantiation_error`.
+
+### `arg/3`
+
+`arg(N, Term, Arg)` — `Arg` is `Term`'s `N`th argument, 1-based.
+`Term` must already be bound and compound (`type_error(compound,
+Term)` otherwise); `N` must be bound to an integer (`type_error(integer,
+N)` otherwise). `N` out of range (less than 1, or more than `Term`'s
+arity) just fails, the same as `nth0/3`/`nth1/3` do for an
+out-of-range index — not an error.
+
+```elixir
+Episteme.query(c.(:arg, [2, c.(:foo, [:a, :b, :c]), Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :b}]}
+```
+
+### `univ/2` (real Prolog: `=..`)
+
+`univ(Term, List)` relates a term to a list of its name followed by
+its arguments — the same decompose/construct duality as `functor/3`,
+just carrying the whole argument list at once instead of counting it.
+
+- **`Term` bound** — `List` unifies with `[Name | Args]` for a
+  compound, or the singleton `[Term]` for an atomic term.
+- **`Term` unbound** — `List` must already be a fully-instantiated,
+  non-empty list. A singleton `[Name]` just unifies `Term` with `Name`
+  as-is; `[Name | Args]` with a non-empty `Args` requires `Name` to be
+  an atom and builds a compound (`Term.reconstruct/2` special-cases
+  `Name` = `.` with exactly two `Args` into a native list here too,
+  same as `functor/3`'s construct mode).
+
+```elixir
+Episteme.query(c.(:univ, [c.(:foo, [:a, :b]), Term.new_var("L")]), Database.new())
+#=> {:ok, [%{"L" => [:foo, :a, :b]}]}
+
+Episteme.query(c.(:univ, [Term.new_var("T"), [:foo, :a, :b]]), Database.new())
+#=> {:ok, [%{"T" => %Episteme.Term.Compound{name: :foo, args: [:a, :b]}}]}
+```
+
+A non-atom head in a multi-element `List` raises `type_error(atom,
+Head)`; an empty `List` raises `domain_error(non_empty_list, [])`; an
+unbound `Term` with an unbound `List` raises `instantiation_error`.
 
 ---
 

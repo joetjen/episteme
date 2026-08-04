@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Term construction and inspection: `functor/3`, `arg/3`, `univ/2`
+  (real Prolog `=..`), and `ground/1` (alongside the existing type
+  checks). `functor/3` and `univ/2` both work in either direction —
+  decomposing an already-bound term, or building a fresh one from a
+  name/arity or `[Name | Args]` list. See
+  [REFERENCE.md](REFERENCE.md#term-construction-and-inspection).
+
 ## [0.1.0] - 2026-08-04
 
 ### Added

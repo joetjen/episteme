@@ -297,15 +297,27 @@ defmodule Episteme.Engine do
     prolog_throw(Exceptions.instantiation_error())
   end
 
-  # -- copy_term/2 --
+  # -- term inspection --
 
   defp dispatch(%Compound{name: :copy_term, args: [t, copy]}, bindings, _db, _barrier) do
     fresh = t |> Term.resolve_deep(bindings) |> Term.fresh_copy()
+    unify_or_fail(bindings, copy, fresh)
+  end
 
-    case Bindings.unify(Term, bindings, copy, fresh) do
-      {:ok, extended} -> Tree.unit().(extended)
-      :fail -> Tree.fail().(bindings)
-    end
+  defp dispatch(%Compound{name: :ground, args: [x]}, bindings, _db, _barrier) do
+    bool_goal(x |> Term.resolve_deep(bindings) |> Term.ground?(), bindings)
+  end
+
+  defp dispatch(%Compound{name: :functor, args: [t, name, arity]}, bindings, _db, _barrier) do
+    functor_goal(t, name, arity, bindings)
+  end
+
+  defp dispatch(%Compound{name: :arg, args: [n, t, a]}, bindings, _db, _barrier) do
+    arg_goal(n, t, a, bindings)
+  end
+
+  defp dispatch(%Compound{name: :univ, args: [t, l]}, bindings, _db, _barrier) do
+    univ_goal(t, l, bindings)
   end
 
   # -- dynamic database (assert/retract) --
@@ -350,6 +362,146 @@ defmodule Episteme.Engine do
 
   defp bool_goal(true, bindings), do: Tree.unit().(bindings)
   defp bool_goal(false, bindings), do: Tree.fail().(bindings)
+
+  defp unify_or_fail(bindings, a, b) do
+    case Bindings.unify(Term, bindings, a, b) do
+      {:ok, extended} -> Tree.unit().(extended)
+      :fail -> Tree.fail().(bindings)
+    end
+  end
+
+  # `functor(T, Name, Arity)`: with `T` bound, decomposes it (an atomic
+  # term has itself as Name and arity 0, matching ISO -- a non-empty
+  # list decomposes via Term.compound?/1's own './2' encoding, same as
+  # everywhere else in this module). With `T` unbound, builds a fresh
+  # term from Name/Arity instead: arity 0 just unifies T with Name
+  # as-is (whatever atomic value it is), arity > 0 requires an atom
+  # Name and builds a compound of that many fresh variables.
+  defp functor_goal(t, name_arg, arity_arg, bindings) do
+    case Bindings.resolve(Term, bindings, t) do
+      %Var{} ->
+        name = resolve_instantiated(name_arg, bindings)
+        arity = resolve_instantiated(arity_arg, bindings)
+        unify_or_fail(bindings, t, build_from_functor(name, arity))
+
+      resolved ->
+        {name, arity} = functor_of(resolved)
+
+        with {:ok, b1} <- Bindings.unify(Term, bindings, name_arg, name),
+             {:ok, b2} <- Bindings.unify(Term, b1, arity_arg, arity) do
+          Tree.unit().(b2)
+        else
+          :fail -> Tree.fail().(bindings)
+        end
+    end
+  end
+
+  defp functor_of(resolved) do
+    if Term.compound?(resolved) do
+      {name, args} = Term.deconstruct(resolved)
+      {name, length(args)}
+    else
+      {resolved, 0}
+    end
+  end
+
+  defp resolve_instantiated(term, bindings) do
+    case Bindings.resolve(Term, bindings, term) do
+      %Var{} -> prolog_throw(Exceptions.instantiation_error())
+      resolved -> resolved
+    end
+  end
+
+  defp build_from_functor(name, 0), do: name
+
+  defp build_from_functor(name, arity) when is_atom(name) and is_integer(arity) and arity > 0,
+    do: Term.reconstruct(name, for(_ <- 1..arity, do: Term.new_var()))
+
+  defp build_from_functor(name, arity) when is_integer(arity) and arity > 0,
+    do: prolog_throw(Exceptions.type_error(:atom, name))
+
+  defp build_from_functor(_name, arity),
+    do: prolog_throw(Exceptions.domain_error(:not_less_than_zero, arity))
+
+  # `arg(N, Term, Arg)`: 1-based, like nth1/3. Out-of-range N (< 1 or >
+  # arity) just fails, matching this project's existing nth0/nth1
+  # style, rather than chasing ISO's own domain_error(not_less_than_zero, N)
+  # distinction for negative N specifically.
+  defp arg_goal(n_arg, t_arg, a_arg, bindings) do
+    n = resolve_instantiated(n_arg, bindings)
+    t = resolve_instantiated(t_arg, bindings)
+
+    cond do
+      not is_integer(n) -> prolog_throw(Exceptions.type_error(:integer, n))
+      not Term.compound?(t) -> prolog_throw(Exceptions.type_error(:compound, t))
+      true -> select_arg(n, t, a_arg, bindings)
+    end
+  end
+
+  # Explicit `n < 1`/`n > length(args)` bounds check rather than
+  # trusting `Enum.at/2`'s `nil` sentinel for "out of range": a
+  # negative index counts from the *end* of the list in `Enum.at/2`
+  # (so `arg(0, foo(a,b), X)` would otherwise wrongly succeed with
+  # `X = b`, via `Enum.at(args, -1)`), and a stored argument can itself
+  # legitimately be the atom `nil`, which is indistinguishable from
+  # "not found" if `Enum.at/2`'s own return value is what gets matched.
+  defp select_arg(n, t, a_arg, bindings) do
+    {_name, args} = Term.deconstruct(t)
+
+    if n >= 1 and n <= length(args) do
+      unify_or_fail(bindings, a_arg, Enum.at(args, n - 1))
+    else
+      Tree.fail().(bindings)
+    end
+  end
+
+  # `univ(Term, List)` (`=..`/2 in ISO's own punctuation): with `Term`
+  # bound, decomposes it the same way functor/3 does (Name alone for an
+  # atomic term, [Name | Args] for a compound). With `Term` unbound,
+  # builds it back from a fully-instantiated [Name | Args] list --
+  # Term.reconstruct/2 already special-cases Name = :. with two args
+  # into a native list, so that shape round-trips through here for
+  # free, same as functor/3.
+  defp univ_goal(t_arg, l_arg, bindings) do
+    case Bindings.resolve(Term, bindings, t_arg) do
+      %Var{} -> univ_construct(l_arg, t_arg, bindings)
+      resolved -> univ_decompose(resolved, l_arg, bindings)
+    end
+  end
+
+  defp univ_decompose(resolved, l_arg, bindings) do
+    list =
+      if Term.compound?(resolved) do
+        {name, args} = Term.deconstruct(resolved)
+        [name | args]
+      else
+        [resolved]
+      end
+
+    unify_or_fail(bindings, l_arg, list)
+  end
+
+  defp univ_construct(l_arg, t_arg, bindings) do
+    case Term.resolve_deep(l_arg, bindings) do
+      %Var{} ->
+        prolog_throw(Exceptions.instantiation_error())
+
+      [name] ->
+        unify_or_fail(bindings, t_arg, name)
+
+      [name | args] when is_atom(name) ->
+        unify_or_fail(bindings, t_arg, Term.reconstruct(name, args))
+
+      [name | _args] ->
+        prolog_throw(Exceptions.type_error(:atom, name))
+
+      [] ->
+        prolog_throw(Exceptions.domain_error(:non_empty_list, []))
+
+      other ->
+        prolog_throw(Exceptions.type_error(:list, other))
+    end
+  end
 
   defp structurally_equal?(a, b, bindings) do
     Term.structurally_equal?(Term.resolve_deep(a, bindings), Term.resolve_deep(b, bindings))
