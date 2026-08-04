@@ -744,6 +744,11 @@ either side of the comparisons above. `X` below stands for whatever
 | `min(3, 7)` | `3` | |
 | `max(3, 7)` | `7` | |
 | `sqrt(16)` | `4.0` | Always a float, even for a perfect square. |
+| `sin(0)` | `0.0` | Radians, like every trig functor here. |
+| `cos(0)` | `1.0` | |
+| `tan(0)` | `0.0` | |
+| `exp(0)` | `1.0` | `e^X`. |
+| `log(1)` | `0.0` | Natural log (base `e`). |
 | `-5` (unary) | `-5` | Negation. |
 | `+5` (unary) | `5` | Identity. |
 

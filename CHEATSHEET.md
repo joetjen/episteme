@@ -174,6 +174,9 @@ Evaluable functors for `is/2` and the comparisons above:
 | `sign(X)` | `1`, `-1`, or `0`. |
 | `min(A, B)`, `max(A, B)` | The usual. |
 | `sqrt(X)` | Always a float. |
+| `sin(X)`, `cos(X)`, `tan(X)` | Trig, radians. |
+| `exp(X)` | `e^X`. |
+| `log(X)` | Natural log (base `e`). |
 | unary `-X`, `+X` | Negation / identity. |
 
 ## Exceptions

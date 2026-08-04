@@ -24,6 +24,14 @@ defmodule Episteme.ArithmeticTest do
       assert solutions(db(), c(:is, [var("X"), c(:sqrt, [16])])) == [%{"X" => 4.0}]
     end
 
+    test "sin/1, cos/1, tan/1, exp/1, and log/1, at values with exact results" do
+      assert solutions(db(), c(:is, [var("X"), c(:sin, [0])])) == [%{"X" => 0.0}]
+      assert solutions(db(), c(:is, [var("X"), c(:cos, [0])])) == [%{"X" => 1.0}]
+      assert solutions(db(), c(:is, [var("X"), c(:tan, [0])])) == [%{"X" => 0.0}]
+      assert solutions(db(), c(:is, [var("X"), c(:exp, [0])])) == [%{"X" => 1.0}]
+      assert solutions(db(), c(:is, [var("X"), c(:log, [1])])) == [%{"X" => 0.0}]
+    end
+
     test "unary +/1 and -/1" do
       assert solutions(db(), c(:is, [var("X"), c(:+, [5])])) == [%{"X" => 5}]
       assert solutions(db(), c(:is, [var("X"), c(:-, [5])])) == [%{"X" => -5}]
