@@ -70,6 +70,19 @@ defmodule Episteme.TermTest do
     end
   end
 
+  describe "ground?/1" do
+    test "a compound/list with no variable anywhere, at any depth, is ground" do
+      assert Term.ground?(%Compound{name: :f, args: [1, [2, :a]]})
+    end
+
+    test "an unbound variable, however deeply nested, makes it non-ground" do
+      x = Term.new_var("X")
+      refute Term.ground?(x)
+      refute Term.ground?(%Compound{name: :f, args: [1, x]})
+      refute Term.ground?([1, [x]])
+    end
+  end
+
   describe "structurally_equal?/2" do
     test "same shape and value is equal" do
       assert Term.structurally_equal?(%Compound{name: :f, args: [1, :a]}, %Compound{
@@ -143,6 +156,12 @@ defmodule Episteme.TermTest do
         # example-based tests above, since it needs *shared* variable
         # refs as input, which a ground-term generator can't produce.
         assert Term.fresh_copy(term) == term
+      end
+    end
+
+    property "ground?/1 is true for every arbitrary ground term, by construction" do
+      check all(term <- ground_term()) do
+        assert Term.ground?(term)
       end
     end
   end

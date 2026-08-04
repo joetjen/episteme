@@ -123,6 +123,13 @@ defmodule Episteme.Term do
 
   def structurally_equal?(a, b), do: a == b
 
+  @doc "True iff `term` contains no unbound variable anywhere -- resolve deeply first (see `resolve_deep/2`) if `term` may still hold bindings."
+  @spec ground?(term()) :: boolean()
+  def ground?(%Var{}), do: false
+  def ground?(%Compound{args: args}), do: Enum.all?(args, &ground?/1)
+  def ground?([h | t]), do: ground?(h) and ground?(t)
+  def ground?(_), do: true
+
   @doc "Canonical `functor(args)` text for an already fully-resolved term -- no operator-aware pretty-printing."
   @spec to_text(term()) :: String.t()
   def to_text(%Var{name: name}), do: name
