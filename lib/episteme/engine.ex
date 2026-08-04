@@ -5,7 +5,7 @@ defmodule Episteme.Engine do
   over a predicate's clauses in declared order, subgoal sequencing is
   `conjunction/2`, both reused unmodified from Ichor. Control constructs
   (`and`, `or`, `if_then`/`if_then_else`, `cut`, `not/1`, `call/N`,
-  `once/1`, `ignore/1`) live directly here rather than in a separate builtins
+  `once/1`, `ignore/1`, `phrase/2,3`) live directly here rather than in a separate builtins
   module: they turned out, once actually implemented, to be inseparable
   from the cut-barrier machinery below, not independent predicates
   dispatchable through a generic table. Every one of these is a plain
@@ -47,7 +47,7 @@ defmodule Episteme.Engine do
   """
 
   alias Episteme.Builtins.{Arithmetic, Exceptions, Io, Lists, Strings}
-  alias Episteme.{Database, Term}
+  alias Episteme.{Database, Dcg, Term}
   alias Episteme.Term.{Compound, Var}
   alias Ichor.Backtrack.{Bindings, Tree}
 
@@ -156,6 +156,20 @@ defmodule Episteme.Engine do
 
   defp dispatch(%Compound{name: :ignore, args: [g]}, bindings, db, _barrier) do
     ignore_goal(g, bindings, db)
+  end
+
+  # -- DCG --
+
+  defp dispatch(%Compound{name: :phrase, args: [body, list]}, bindings, db, _barrier) do
+    phrase_goal(body, list, [], db, bindings)
+  end
+
+  defp dispatch(%Compound{name: :phrase, args: [body, list, rest]}, bindings, db, _barrier) do
+    phrase_goal(body, list, rest, db, bindings)
+  end
+
+  defp dispatch(%Compound{name: :dcg_translate, args: [rule, clause]}, bindings, _db, _barrier) do
+    dcg_translate_goal(rule, clause, bindings)
   end
 
   # -- solution aggregation --
@@ -645,6 +659,52 @@ defmodule Episteme.Engine do
     end
   end
 
+  # `phrase(Body, List)`/`phrase(Body, List, Rest)`: translates `Body`
+  # (a DCG body -- see `Episteme.Dcg`) into an ordinary goal threading
+  # `List`/`Rest` as the incoming/outgoing difference list, then solves
+  # it exactly like `call/N` (fresh barrier, cut-opaque). `Body` itself
+  # must already be bound -- an unbound body would otherwise translate
+  # to `phrase(Body, List, Rest)` right back (`Episteme.Dcg.translate_body/3`'s
+  # own variable-body case, meant for a *nested* DCG body position, not
+  # this top-level one) and loop forever instead of raising the
+  # `instantiation_error` real Prolog does.
+  defp phrase_goal(body_arg, list_arg, rest_arg, db, bindings) do
+    case Bindings.resolve(Term, bindings, body_arg) do
+      %Var{} ->
+        prolog_throw(Exceptions.instantiation_error())
+
+      resolved_body ->
+        translated =
+          Dcg.translate_body(Term.resolve_deep(resolved_body, bindings), list_arg, rest_arg)
+
+        inner_barrier = make_ref()
+        guard_cut(goal(translated, db, inner_barrier).(bindings), inner_barrier)
+    end
+  end
+
+  # `dcg_translate(Rule, Clause)`: the readable alias for `-->/2` itself
+  # (see `predicate_catalog` in DESIGN.md) -- unifies `Clause` with the
+  # ordinary `Head2 :- Body2` clause term `Rule` (a `Head --> Body`
+  # term) translates to, without storing anything. Exposed mainly for
+  # introspection/testing; `assert/1` and `Database.consult_forms/2`'s
+  # own `{:dcg, head, body}` form call `Episteme.Dcg.translate_rule/2`
+  # directly, storing the result instead of unifying it.
+  defp dcg_translate_goal(rule_arg, clause_arg, bindings) do
+    case Bindings.resolve(Term, bindings, rule_arg) do
+      %Compound{name: :"-->", args: [head, body]} ->
+        {new_head, new_body} =
+          Dcg.translate_rule(Term.resolve_deep(head, bindings), Term.resolve_deep(body, bindings))
+
+        unify_or_fail(bindings, clause_arg, %Compound{name: :":-", args: [new_head, new_body]})
+
+      %Var{} ->
+        prolog_throw(Exceptions.instantiation_error())
+
+      other ->
+        prolog_throw(Exceptions.type_error(:"-->", other))
+    end
+  end
+
   # `findall/3` is cut-opaque and always succeeds -- `[]` is a perfectly
   # good answer when `g` has no solutions, unlike `bagof/3`/`setof/3`
   # (not implemented here) which fail in that case instead.
@@ -1039,6 +1099,11 @@ defmodule Episteme.Engine do
 
   defp store_clause(%Compound{name: :":-", args: [head, body]}, db, position),
     do: assert_clause(head, body, db, position)
+
+  defp store_clause(%Compound{name: :"-->", args: [head, body]}, db, position) do
+    {dcg_head, dcg_body} = Dcg.translate_rule(head, body)
+    assert_clause(dcg_head, dcg_body, db, position)
+  end
 
   defp store_clause(%Var{}, _db, _position), do: prolog_throw(Exceptions.instantiation_error())
   defp store_clause(%Compound{} = head, db, position), do: assert_clause(head, true, db, position)

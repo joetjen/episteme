@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- DCG (Definite Clause Grammar) support, closing out v0.5: a new
+  `Episteme.Dcg` module (`translate_rule/2`, `translate_body/3`)
+  translates a `Head --> Body` rule into an ordinary clause, threading
+  an incoming/outgoing difference-list pair through every nonterminal
+  call. A practical subset of real DCG translation -- terminals,
+  `{Goal}` (ISO's own `'{}'/1` embedded-goal shape), `cut`, `and/2`,
+  `or/2`, `if_then/2`, `if_then_else/3`, `not/1`, a bare nonterminal,
+  and a variable body (`phrase(Var, S0, S)`) -- deliberately not all of
+  it (no `call//N` pushback). `phrase/2,3` (`Episteme.Engine`) runs a
+  DCG body as an ordinary goal; `dcg_translate/2` is the readable
+  `-->/2` alias for introspection; a new `{:dcg, head, body}`
+  `Episteme.Database.consult_forms/2` form and `-->/2`-shaped
+  `assert/1` (same as `:-/2` is already special-cased) both translate
+  and store. See
+  [REFERENCE.md](REFERENCE.md#dcg-definite-clause-grammars).
 - `format/1` and `format/2`, closing out v0.4 entirely. A practical
   subset of ISO/SWI's own directive set (`~w`/`~p`/`~q` -- all the same
   thing here, `Term.to_text/1` -- `~a`, `~d`, `~s`, `~i`, `~n`, `~~`),
