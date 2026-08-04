@@ -283,9 +283,15 @@ strings instead (and `string_chars/2` produces single-character
 | `writeln(Term)` | Same, with a trailing newline. |
 | `print(Term)` | Same as `write/1`. |
 | `nl` | Prints a newline. |
+| `format(Format, Args)` (also `/1`, `Args = []`) | Prints `Format` with each `~`-directive consuming the next element of `Args`. A non-list `Args` is treated as `[Args]`. |
 
 No operator-aware pretty-printing (e.g. `1+2` prints as `+(1, 2)`) — a
 front-end reader is where that would live.
+
+`format/2` directives: `~w`/`~p`/`~q` (term text, all the same here),
+`~a` (atom text), `~d` (integer text), `~s` (code-list/string text),
+`~i` (skip an argument), `~n` (newline), `~~` (literal `~`). No
+column/radix directives (`~t`, `~|`, `~Nr`, numeric-prefixed `~Nd`).
 
 ## `Episteme.Term` (Elixir side)
 

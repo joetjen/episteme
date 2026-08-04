@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `format/1` and `format/2`, closing out v0.4 entirely. A practical
+  subset of ISO/SWI's own directive set (`~w`/`~p`/`~q` -- all the same
+  thing here, `Term.to_text/1` -- `~a`, `~d`, `~s`, `~i`, `~n`, `~~`),
+  deliberately not all of it (no column/radix directives, no
+  numeric-prefixed `~Nd`). `Args` is normally a proper list, one
+  element consumed per directive left to right; a single non-list
+  `Args` is treated as `[Args]`, matching SWI's own leniency. Lives in
+  `Episteme.Builtins.Io` alongside `write/1` and friends, reusing
+  `Episteme.Builtins.Strings.require_atomic_text/2` for the format
+  string itself. See [REFERENCE.md](REFERENCE.md#format1-and-format2).
 - A real string type -- a genuinely new atomic term class, backed by
   plain Elixir binaries with no wrapper struct (the same
   "raw host-language value" pattern atoms/integers/floats already use),
