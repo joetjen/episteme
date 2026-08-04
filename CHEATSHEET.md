@@ -60,6 +60,7 @@ same vocabulary, defined there at more length.
 | atom `foo` | `:foo` |
 | integer `42` | `42` |
 | float `3.14` | `3.14` |
+| string `"foo"` | `"foo"` (a native Elixir binary -- a distinct type from atoms, see `string_type_decision`, DESIGN.md) |
 | variable `X` | `Term.new_var("X")` (anonymous: `Term.new_var()`, name defaults to `"_"`) |
 | compound `foo(A, B)` | `%Compound{name: :foo, args: [a, b]}` |
 | list `[1, 2, 3]` | `[1, 2, 3]` (a native Elixir list) |
@@ -134,7 +135,8 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 | `var(X)` | An unbound variable. |
 | `nonvar(X)` | Anything else. |
 | `atom(X)` | A plain atom. |
-| `atomic(X)` | An atom or number (not a variable, compound, or list). |
+| `string(X)` | A real string (see string_type_decision, DESIGN.md) -- never true for an atom with the same characters. |
+| `atomic(X)` | An atom, number, or string (not a variable, compound, or list). |
 | `number(X)` | An integer or float. |
 | `integer(X)` | An integer. |
 | `float(X)` | A float. |
@@ -247,6 +249,31 @@ Effects are visible immediately to every later call against the same
 | `exclude(Goal, List, Kept)` | Elements where it doesn't. |
 | `foldl(Goal, List, V0, V)` (also `/5`, `/6` for 2–3 lists) | Threads an accumulator: `call(Goal, Elem, AccIn, AccOut)` per element. |
 | `maplist(Goal, List1, ..., ListN)` | Succeeds iff `call(Goal, E1_i, ..., EN_i)` succeeds for every row. At least one list must be bound; others get built fresh. |
+
+## Atom, number, and string conversions
+
+`atom_*`/`number_*` work with atoms (and `atom_chars/2` produces
+single-character *atoms*); `string_*`/`split_string` work with real
+strings instead (and `string_chars/2` produces single-character
+*strings*) -- the two families are not interchangeable.
+
+| Goal | Meaning |
+|---|---|
+| `atom_codes(A, Codes)`, `atom_chars(A, Chars)` | Atom <-> code list / single-char-atom list, either direction. |
+| `atom_length(Atomic, Len)` | Character count of any atomic term's text. |
+| `atom_concat(A1, A2, A3)` | `A1`+`A2` bound: concatenates. `A3` only: enumerates every split on backtracking. |
+| `sub_atom(Atom, Before, Len, After, Sub)` | Relates `Atom` to every substring; unbound args enumerate, bound ones narrow. `Sub` is always an atom. |
+| `char_code(Char, Code)` | Single-character atom <-> its code, either direction. |
+| `number_codes(N, Codes)`, `number_chars(N, Chars)` | Number <-> code list / single-char-atom list, either direction; unparseable text raises `type_error(number, _)`. |
+| `upcase_atom(A, U)`, `downcase_atom(A, D)` | Case conversion. |
+| `atomic_list_concat(List, A)` | Concatenates a bound list of atomics (no splitting mode). |
+| `atomic_list_concat(List, Sep, A)` | List bound: joins with `Sep`. List unbound, `A` bound: splits `A` on `Sep` (deterministic, unlike `atom_concat/3`'s enumeration). |
+| `atom_string(A, S)`, `string_to_atom(S, A)` | Atom <-> string, either direction (same conversion, argument order swapped). |
+| `string_concat(S1, S2, S3)` | Same shape as `atom_concat/3`, but string results. |
+| `string_chars(S, Chars)`, `string_codes(S, Codes)` | Same shape as the `atom_*` versions, but string/code results (`string_chars/2`'s chars are strings, not atoms). |
+| `string_length(S, Len)` | Character count. |
+| `number_string(N, S)` | Like `atom_string/2`, for numbers. |
+| `split_string(S, SepChars, PadChars, SubStrings)` | Splits `S` on any char in `SepChars` (`""` = don't split), then trims `PadChars` from each field's ends. Always strings. |
 
 ## I/O
 
