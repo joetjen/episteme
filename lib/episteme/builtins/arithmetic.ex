@@ -52,6 +52,11 @@ defmodule Episteme.Builtins.Arithmetic do
   defp eval_compound(:min, [a, b]), do: min(a, b)
   defp eval_compound(:max, [a, b]), do: max(a, b)
   defp eval_compound(:sqrt, [a]), do: :math.sqrt(a)
+  defp eval_compound(:sin, [a]), do: :math.sin(a)
+  defp eval_compound(:cos, [a]), do: :math.cos(a)
+  defp eval_compound(:tan, [a]), do: :math.tan(a)
+  defp eval_compound(:exp, [a]), do: :math.exp(a)
+  defp eval_compound(:log, [a]), do: :math.log(a)
   defp eval_compound(:-, [a]), do: -a
   defp eval_compound(:+, [a]), do: a
 

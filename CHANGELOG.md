@@ -59,8 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [REFERENCE.md](REFERENCE.md#unify_with_occurs_check2). Also
   `existence_error/2`, exposed as a directly-callable goal alongside
   `type_error/2`/`domain_error/2`/`instantiation_error/1` -- previously
-  only ever thrown internally (on an undefined-predicate call). This
-  closes out the full v0.2 predicate catalog.
+  only ever thrown internally (on an undefined-predicate call) -- and
+  the last five evaluable functors: `sin/1`, `cos/1`, `tan/1`, `exp/1`,
+  `log/1` (natural log), alongside the existing `sqrt/1` in
+  `Episteme.Builtins.Arithmetic`. This closes out the full v0.2
+  predicate catalog.
 
 ## [0.1.0] - 2026-08-04
 
