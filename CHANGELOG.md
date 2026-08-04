@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Rounds out the dynamic-database family: `abolish/1` (unlike
+  `retractall/1`, undefines the predicate too -- a later call raises
+  `existence_error` again) and `dynamic/1` (declares a predicate
+  defined with zero clauses, so a call fails instead of raising
+  `existence_error`, and `assert`/`retract` work on it immediately;
+  accepts a single `Name/Arity` or a list of them). Both build on two
+  new `Episteme.Database` functions, `abolish/3` and
+  `declare_dynamic/3`, and a new `Episteme.Database.Backend` callback
+  (`abolish/3`, implemented in both `Backends.Ets` and `Backends.Dets`).
+  Also `clause/2`: enumerates every stored clause for `Head`'s own
+  `{name, arity}` whose head unifies with it, one per backtrack. See
+  [REFERENCE.md](REFERENCE.md#dynamic-database).
 - The rest of the v0.2 list-predicate family: `msort/2`, `sort/2`,
   `permutation/2`, `sum_list/2`, `max_list/2`, `min_list/2`, and
   `list_to_set/2` (pure operations, in `Episteme.Builtins.Lists`, all

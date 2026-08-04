@@ -44,7 +44,7 @@ c = fn name, args -> %Compound{name: name, args: args} end
 - [Exceptions](#exceptions) — `throw`, `catch`, `type_error`,
   `domain_error`, `instantiation_error`, and what's raised automatically
 - [Dynamic database](#dynamic-database) — `assert`, `asserta`,
-  `assertz`, `retract`, `retractall`
+  `assertz`, `retract`, `retractall`, `abolish`, `dynamic`, `clause`
 - [Lists](#lists) — `length`, `append`, `member`, `reverse`, `nth0`,
   `nth1`, `last`, `msort`, `sort`, `permutation`, `sum_list`,
   `max_list`, `min_list`, `list_to_set`
@@ -894,6 +894,59 @@ Episteme.query(c.(:retractall, [c.(:s, [Term.new_var("_")])]), db)
 
 Episteme.query(c.(:s, [Term.new_var("X")]), db)
 #=> {:ok, []}
+```
+
+### `abolish/1`
+
+`abolish(Name/Arity)` removes every stored clause *and* the predicate's
+defined status — unlike `retractall/1`, a call afterward raises
+`existence_error` again, exactly as if it had never been asserted.
+
+```elixir
+db = Database.new() |> Database.add_fact(c.(:p, [1]))
+Episteme.query(c.(:abolish, [c.(:/, [:p, 1])]), db)
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:p, [1]), db)
+#=> {:error, error(existence_error(procedure, p/1), _)}
+```
+
+### `dynamic/1`
+
+`dynamic(Name/Arity)` (or `dynamic([Name/Arity, ...])` for several at
+once) declares a predicate defined with zero clauses, so a call fails
+instead of raising `existence_error`, and `assert`/`retract` can be
+used on it right away — without this, asserting to a brand-new
+predicate already works (asserting *is* defining it), but calling one
+that has never been asserted to yet does not. A no-op if the predicate
+already has clauses; existing ones are never touched.
+
+```elixir
+db = Database.new()
+Episteme.query(c.(:dynamic, [c.(:/, [:counter, 1])]), db)
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:counter, [Term.new_var("X")]), db)
+#=> {:ok, []}   -- fails, doesn't raise existence_error
+```
+
+### `clause/2`
+
+`clause(Head, Body)` enumerates every stored clause for `Head`'s own
+`{name, arity}` whose (freshly renamed) head unifies with `Head`, one
+per backtrack, unifying `Body` with that clause's own (freshly
+renamed) body — a fact's body is `true`. `Head` must already be bound
+enough to know its functor/arity; calling on an undefined predicate
+just fails, it doesn't raise `existence_error`.
+
+```elixir
+db =
+  Database.new()
+  |> Database.add_fact(c.(:p, [1]))
+  |> Database.add_fact(c.(:p, [3]))
+
+Episteme.query(c.(:clause, [c.(:p, [Term.new_var("X")]), Term.new_var("Body")]), db)
+#=> {:ok, [%{"Body" => true, "X" => 1}, %{"Body" => true, "X" => 3}]}
 ```
 
 ---

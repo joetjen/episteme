@@ -35,6 +35,9 @@ defmodule Episteme.Database.Backend do
   @doc "Whether any clause has ever been stored for `{name, arity}` (including a since-emptied `retractall/1`)."
   @callback defined?(state(), atom(), non_neg_integer()) :: boolean()
 
+  @doc "Completely removes `{name, arity}` from storage -- unlike `replace_clauses/4` with `[]`, `defined?/3` becomes false again afterward."
+  @callback abolish(state(), atom(), non_neg_integer()) :: :ok
+
   @doc "Forces any buffered writes to durable storage. A no-op for a purely in-memory backend."
   @callback sync(state()) :: :ok
 

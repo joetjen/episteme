@@ -70,6 +70,40 @@ defmodule Episteme.DatabaseTest do
     end
   end
 
+  describe "abolish/3" do
+    test "removes clauses and defined?/3 goes back to false, unlike replace_clauses/4 with []" do
+      db =
+        Database.new()
+        |> Database.add_fact(%Compound{name: :p, args: [1]})
+        |> Database.abolish(:p, 1)
+
+      refute Database.defined?(db, :p, 1)
+      assert Database.clauses_for(db, :p, 1) == []
+    end
+
+    test "a no-op on a predicate that was never defined" do
+      db = Database.abolish(Database.new(), :nope, 3)
+      refute Database.defined?(db, :nope, 3)
+    end
+  end
+
+  describe "declare_dynamic/3" do
+    test "marks a never-defined predicate defined, with zero clauses" do
+      db = Database.declare_dynamic(Database.new(), :counter, 1)
+      assert Database.defined?(db, :counter, 1)
+      assert Database.clauses_for(db, :counter, 1) == []
+    end
+
+    test "a no-op when the predicate already has clauses -- they survive untouched" do
+      db =
+        Database.new()
+        |> Database.add_fact(%Compound{name: :p, args: [1]})
+        |> Database.declare_dynamic(:p, 1)
+
+      assert Database.clauses_for(db, :p, 1) == [{%Compound{name: :p, args: [1]}, true}]
+    end
+  end
+
   describe "indicator/1" do
     test "a compound's indicator is {name, arg count}" do
       assert Database.indicator(%Compound{name: :foo, args: [1, 2, 3]}) == {:foo, 3}

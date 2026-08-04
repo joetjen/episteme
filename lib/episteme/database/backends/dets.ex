@@ -46,6 +46,12 @@ defmodule Episteme.Database.Backends.Dets do
   def defined?(table, name, arity), do: :dets.member(table, {name, arity})
 
   @impl true
+  def abolish(table, name, arity) do
+    :ok = :dets.delete(table, {name, arity})
+    :ok
+  end
+
+  @impl true
   def sync(table), do: :dets.sync(table)
 
   @impl true
