@@ -35,9 +35,9 @@ c = fn name, args -> %Compound{name: name, args: args} end
   standard order of terms (`order_less`, `order_greater`,
   `order_less_or_equal`, `order_greater_or_equal`, `compare`),
   `copy_term`
-- [Type checks](#type-checks) — `var`, `nonvar`, `atom`, `atomic`,
-  `number`, `integer`, `float`, `compound`, `callable`, `is_list`,
-  `ground`
+- [Type checks](#type-checks) — `var`, `nonvar`, `atom`, `string`,
+  `atomic`, `number`, `integer`, `float`, `compound`, `callable`,
+  `is_list`, `ground`
 - [Term construction and inspection](#term-construction-and-inspection)
   — `functor`, `arg`, `univ`
 - [Arithmetic](#arithmetic) — `is`, comparisons, `between`, every
@@ -52,6 +52,12 @@ c = fn name, args -> %Compound{name: name, args: args} end
   `max_list`, `min_list`, `list_to_set`
 - [Higher-order list predicates](#higher-order-list-predicates) —
   `include`, `exclude`, `foldl`, `maplist`
+- [Atom, number, and string conversions](#atom-number-and-string-conversions)
+  — `atom_codes`, `atom_chars`, `atom_length`, `atom_concat`,
+  `sub_atom`, `char_code`, `number_codes`, `number_chars`,
+  `upcase_atom`, `downcase_atom`, `atomic_list_concat`, `atom_string`,
+  `string_to_atom`, `string_concat`, `string_chars`, `string_codes`,
+  `string_length`, `number_string`, `split_string`
 - [I/O](#io) — `write`, `writeln`, `print`, `nl`
 
 A note before diving in: every goal name below is a plain English word
@@ -541,13 +547,32 @@ Episteme.query(c.(:atom, [1]), Database.new())
 #=> {:ok, []}
 ```
 
+### `string/1`
+
+True for a real string (see [Atom, number, and string conversions](#atom-number-and-string-conversions)
+below, and `string_type_decision` in DESIGN.md) — false for an atom
+with the same characters, or anything else. A string is never `atom/1`,
+and an atom is never `string/1`, no matter how they print.
+
+```elixir
+Episteme.query(c.(:string, ["foo"]), Database.new())
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:string, [:foo]), Database.new())
+#=> {:ok, []}
+```
+
 ### `atomic/1`
 
-True for an atom *or* a number — anything with no internal structure to
-speak of. False for compounds, non-empty lists, and unbound variables.
+True for an atom, a number, *or* a string — anything with no internal
+structure to speak of. False for compounds, non-empty lists, and
+unbound variables.
 
 ```elixir
 Episteme.query(c.(:atomic, [1]), Database.new())
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:atomic, ["foo"]), Database.new())
 #=> {:ok, [%{}]}
 
 Episteme.query(c.(:atomic, [c.(:foo, [1])]), Database.new())
@@ -1248,6 +1273,207 @@ Episteme.query(c.(:maplist, [:positive, [1, 2, 3]]), positive_db)
 
 Episteme.query(c.(:maplist, [:positive, [1, -2, 3]]), positive_db)
 #=> {:ok, []}   -- -2 isn't
+```
+
+---
+
+## Atom, number, and string conversions
+
+Two families, sharing one underlying idea: every predicate here reads
+or produces the *text* of an atomic term (atom, number, or a real
+string — see `string_type_decision` in DESIGN.md, and
+[`string/1`](#string1) above). The `atom_*`/`number_*` family (classic
+ISO, or long-standing de-facto library predicates) works with atoms;
+the `string_*`/`split_string` family (SWI-style) works with real
+strings instead. They're not interchangeable — `atom_chars/2` produces
+single-character *atoms*, `string_chars/2` produces single-character
+*strings*, and neither unifies with the other's output.
+
+### `atom_codes/2` and `atom_chars/2`
+
+Convert an atom to/from a list — `atom_codes/2` to a list of character
+codes (a plain integer list, exactly what `Episteme`'s own code lists
+already are, no wrapping needed), `atom_chars/2` to a list of
+single-character *atoms*. Both work in either direction: with the atom
+bound, they decompose it; with the list bound (and every element
+already bound), they build the atom instead.
+
+```elixir
+Episteme.query(c.(:atom_codes, [:hi, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => ~c"hi"}]}
+
+Episteme.query(c.(:atom_codes, [Term.new_var("A"), ~c"hi"]), Database.new())
+#=> {:ok, [%{"A" => :hi}]}
+
+Episteme.query(c.(:atom_chars, [:hi, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [:h, :i]}]}
+```
+
+### `atom_length/2`
+
+`atom_length(Atomic, Length)` — the character count (not byte count)
+of any atomic term's text, not just an atom's despite the name.
+
+```elixir
+Episteme.query(c.(:atom_length, [:hello, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => 5}]}
+```
+
+### `atom_concat/3`
+
+With both `Atom1`/`Atom2` bound, concatenates them (as text) into a
+fresh atom. With only `Atom3` bound, enumerates *every* way to split
+its text into a prefix/suffix pair on backtracking — the same
+"generate every candidate, let unification filter it" shape
+`Episteme.Builtins.Lists`' own `append/3` uses over lists, so a caller
+with `Atom1` or `Atom2` already bound gets a narrowed search "for
+free" rather than needing a separate deterministic code path.
+
+```elixir
+Episteme.query(c.(:atom_concat, [:foo, :bar, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :foobar}]}
+
+Episteme.query(c.(:atom_concat, [Term.new_var("X"), Term.new_var("Y"), :ab]), Database.new())
+#=> {:ok, [%{"X" => :"", "Y" => :ab}, %{"X" => :a, "Y" => :b}, %{"X" => :ab, "Y" => :""}]}
+```
+
+### `sub_atom/5`
+
+`sub_atom(Atom, Before, Length, After, Sub)` relates `Atom` to every
+one of its substrings: `Before` characters, then `Length` characters
+(`Sub`), then `After` characters, adding up to the whole. With only
+`Atom` bound, enumerates every decomposition (`Before` outer, `Length`
+inner, both ascending) on backtracking; any of the other four already
+bound narrows the search via unification, the same "generate every
+candidate" shape `atom_concat/3` above uses. `Sub` is always an atom,
+even when `Atom` was a string.
+
+```elixir
+Episteme.query(
+  c.(:sub_atom, [:abc, 1, 2, Term.new_var("After"), Term.new_var("Sub")]),
+  Database.new()
+)
+#=> {:ok, [%{"After" => 0, "Sub" => :bc}]}
+
+Episteme.query(
+  c.(:sub_atom, [:abcabc, Term.new_var("Before"), 3, Term.new_var("After"), :abc]),
+  Database.new()
+)
+#=> {:ok, [%{"Before" => 0, "After" => 3}, %{"Before" => 3, "After" => 0}]}
+```
+
+### `char_code/2`
+
+Relates a single-character atom to its character code, either
+direction.
+
+```elixir
+Episteme.query(c.(:char_code, [:a, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => 97}]}
+```
+
+### `number_codes/2` and `number_chars/2`
+
+Like `atom_codes/2`/`atom_chars/2`, but for numbers -- a bound number
+converts to codes/chars; a bound, well-formed codes/chars list parses
+back to a number (raising `type_error(number, _)` if it doesn't parse
+as one, full stop, with nothing left over).
+
+```elixir
+Episteme.query(c.(:number_codes, [3.5, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => ~c"3.5"}]}
+
+Episteme.query(c.(:number_codes, [Term.new_var("N"), ~c"123"]), Database.new())
+#=> {:ok, [%{"N" => 123}]}
+```
+
+### `upcase_atom/2` and `downcase_atom/2`
+
+```elixir
+Episteme.query(c.(:upcase_atom, [:hello, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :HELLO}]}
+```
+
+### `atomic_list_concat/2` and `atomic_list_concat/3`
+
+The `/2` form concatenates a bound list of atomics into one atom --
+concatenation only, no splitting mode (there's no separator to split
+on). The `/3` form takes a separator: with the list bound, joins its
+elements' text with `Sep` between them; with the list unbound (and the
+result atom bound instead), splits the result's text on `Sep` --
+deterministically, a single split-point sequence via `String.split/2`,
+*not* `atom_concat/3`'s "every possible split" enumeration.
+
+```elixir
+Episteme.query(c.(:atomic_list_concat, [[:foo, :bar, 1], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :foobar1}]}
+
+Episteme.query(c.(:atomic_list_concat, [[:foo, :bar], :-, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :"foo-bar"}]}
+
+Episteme.query(c.(:atomic_list_concat, [Term.new_var("X"), :-, :"foo-bar-baz"]), Database.new())
+#=> {:ok, [%{"X" => [:foo, :bar, :baz]}]}
+```
+
+### `atom_string/2` and `string_to_atom/2`
+
+Convert between an atom and a real string, either direction -- the two
+predicates are the same conversion with the argument order swapped
+(`atom_string(Atom, String)` vs. `string_to_atom(String, Atom)`), both
+provided since real Prolog code uses either depending on which side is
+already bound.
+
+```elixir
+Episteme.query(c.(:atom_string, [:hello, Term.new_var("S")]), Database.new())
+#=> {:ok, [%{"S" => "hello"}]}
+
+Episteme.query(c.(:string_to_atom, ["hello", Term.new_var("A")]), Database.new())
+#=> {:ok, [%{"A" => :hello}]}
+```
+
+### `string_concat/3`, `string_chars/2`, `string_codes/2`, `string_length/2`
+
+The `string_*` counterparts of `atom_concat/3`, `atom_chars/2`,
+`atom_codes/2`, and `atom_length/2` above -- same behavior (including
+`string_concat/3`'s own "enumerate every split" backtracking mode),
+except every result is a real string instead of an atom.
+`string_chars/2` in particular produces single-character *strings*,
+not the single-character *atoms* `atom_chars/2` does.
+
+```elixir
+Episteme.query(c.(:string_concat, ["foo", "bar", Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => "foobar"}]}
+
+Episteme.query(c.(:string_chars, ["hi", Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => ["h", "i"]}]}
+```
+
+### `number_string/2`
+
+Like `atom_string/2`, but for numbers.
+
+```elixir
+Episteme.query(c.(:number_string, [Term.new_var("N"), "42"]), Database.new())
+#=> {:ok, [%{"N" => 42}]}
+```
+
+### `split_string/4`
+
+`split_string(String, SepChars, PadChars, SubStrings)` (SWI): splits
+`String` on every occurrence of any character in `SepChars` (no
+splitting at all -- the whole string as one field -- when `SepChars`
+is `""`), then strips any run of characters found in `PadChars` from
+both ends of each resulting field. Always produces real strings.
+
+```elixir
+Episteme.query(
+  c.(:split_string, ["hello world foo", " ", "", Term.new_var("X")]),
+  Database.new()
+)
+#=> {:ok, [%{"X" => ["hello", "world", "foo"]}]}
+
+Episteme.query(c.(:split_string, ["  hi  ", "", " ", Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => ["hi"]}]}   -- SepChars "" means "don't split", just trim
 ```
 
 ---

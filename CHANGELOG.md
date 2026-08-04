@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A real string type -- a genuinely new atomic term class, backed by
+  plain Elixir binaries with no wrapper struct (the same
+  "raw host-language value" pattern atoms/integers/floats already use),
+  not ISO's own code-list default (see `string_type_decision`,
+  DESIGN.md). `"abc"` now unifies with `"abc"` by exact byte equality
+  and never with `[97,98,99]` or `abc` -- both structurally distinct
+  from a string. Standard order of terms gained a fourth class between
+  atom and compound (`Var < Number < Atom < String < Compound`), and a
+  new `string/1` type check joins `atom/1`/`atomic/1` (the latter now
+  also true for strings). Alongside it, the v0.4 atom/number/string
+  conversion family, in a new `Episteme.Builtins.Strings`:
+  `atom_codes/2`, `atom_chars/2`, `atom_length/2`, `atom_concat/3`,
+  `sub_atom/5`, `char_code/2`, `number_codes/2`, `number_chars/2`,
+  `upcase_atom/2`, `downcase_atom/2`, `atomic_list_concat/2,3`
+  (classic ISO/de-facto, working with atoms), and their SWI-style real-
+  string counterparts `atom_string/2`, `string_to_atom/2`,
+  `string_concat/3`, `string_chars/2`, `string_codes/2`,
+  `string_length/2`, `number_string/2`, `split_string/4`. `atom_concat/3`,
+  `string_concat/3`, and `sub_atom/5` all enumerate every matching
+  decomposition on backtracking (the same "generate every candidate,
+  let unify filter it" shape `append/3` already uses over lists) rather
+  than needing separate deterministic/nondeterministic code paths. See
+  [REFERENCE.md](REFERENCE.md#atom-number-and-string-conversions).
 - `bagof/3` and `setof/3`, completing the v0.3 aggregation family
   alongside the existing `findall/3`. Unlike `findall/3`, both fail
   outright (not `List = []`) when the goal has no solutions, and group

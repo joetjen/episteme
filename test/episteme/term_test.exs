@@ -83,22 +83,40 @@ defmodule Episteme.TermTest do
     end
   end
 
-  describe "compare_order/2 (ISO standard order of terms: Var < Number < Atom < Compound)" do
-    test "a variable orders before any number, atom, or compound" do
+  describe "compare_order/2 (standard order of terms: Var < Number < Atom < String < Compound)" do
+    test "a variable orders before any number, atom, string, or compound" do
       x = Term.new_var("X")
       assert Term.compare_order(x, 0) == :lt
       assert Term.compare_order(x, :a) == :lt
+      assert Term.compare_order(x, "a") == :lt
       assert Term.compare_order(x, %Compound{name: :f, args: [1]}) == :lt
     end
 
-    test "a number orders before any atom or compound" do
+    test "a number orders before any atom, string, or compound" do
       assert Term.compare_order(0, :a) == :lt
+      assert Term.compare_order(0, "a") == :lt
       assert Term.compare_order(999_999, %Compound{name: :a, args: [1]}) == :lt
     end
 
-    test "an atom orders before any compound, [] included" do
+    test "an atom orders before any string or compound, [] included" do
+      assert Term.compare_order(:zzz, "aaa") == :lt
       assert Term.compare_order(:zzz, %Compound{name: :a, args: [1]}) == :lt
       assert Term.compare_order([], %Compound{name: :a, args: [1]}) == :lt
+    end
+
+    test "a string orders before any compound, but after every atom" do
+      assert Term.compare_order("aaa", %Compound{name: :a, args: [1]}) == :lt
+      assert Term.compare_order("aaa", :zzz) == :gt
+    end
+
+    test "strings compare alphabetically, same as atoms" do
+      assert Term.compare_order("abc", "abd") == :lt
+      assert Term.compare_order("b", "a") == :gt
+    end
+
+    test "a string is never == an atom with the same characters, structurally or by order" do
+      refute Term.structurally_equal?("abc", :abc)
+      assert Term.compare_order("abc", :abc) == :gt
     end
 
     test "numbers compare by value; equal value sorts float before integer" do
@@ -174,9 +192,9 @@ defmodule Episteme.TermTest do
     end
   end
 
-  # Ground (variable-free) terms built from atoms/integers as leaves,
-  # native lists and %Compound{} as containers -- deliberately no
-  # floats (an integer and a float at the same value are *not*
+  # Ground (variable-free) terms built from atoms/integers/strings as
+  # leaves, native lists and %Compound{} as containers -- deliberately
+  # no floats (an integer and a float at the same value are *not*
   # structurally_equal?/2, so a leaf generator mixing both would need
   # every property below to account for that on its own) and no
   # variables (a fresh Term.new_var/1 in every generated sample would
@@ -184,7 +202,7 @@ defmodule Episteme.TermTest do
   # two freshly generated variables are never structurally equal to one
   # another no matter how the rest of the term matches).
   defp ground_term do
-    leaf = one_of([integer(), atom(:alphanumeric)])
+    leaf = one_of([integer(), atom(:alphanumeric), string(:alphanumeric)])
 
     StreamData.tree(leaf, fn generator ->
       one_of([

@@ -1,8 +1,12 @@
 defmodule Episteme.Term do
   @moduledoc """
   Episteme's term representation: atoms and numbers are plain Elixir
-  atoms/integers/floats, lists are native Elixir lists, variables and
-  compounds get dedicated structs. This module is the
+  atoms/integers/floats, a real Prolog string (see `string_type_decision`,
+  DESIGN.md) is a plain Elixir binary -- a genuinely new atomic term
+  class, not a list of codes, but still no dedicated struct, the same
+  "raw host-language value" pattern atoms/integers/floats already use --
+  lists are native Elixir lists, variables and compounds get dedicated
+  structs. This module is the
   `Ichor.Backtrack.Term` implementation passed explicitly to every
   `Ichor.Backtrack.Bindings` call, plus the handful of whole-term
   operations (deep resolve, rename-apart) built on
@@ -135,10 +139,16 @@ defmodule Episteme.Term do
   sorting before an integer of equal value (`1.0` before `1`); atoms
   alphabetically by character code (`[]`, the empty-list atom, sorts
   as if its name were the two characters `[` `]`, same as any other
-  atom); compounds (a non-empty list decomposes via the same `'.'/2`
-  cons functor `compound?/1` uses everywhere else) by arity first, then
-  functor name alphabetically, then arguments left to right,
-  recursively.
+  atom); strings (see `string_type_decision`, DESIGN.md) alphabetically
+  by byte value, same comparator as atoms; compounds (a non-empty list
+  decomposes via the same `'.'/2` cons functor `compound?/1` uses
+  everywhere else) by arity first, then functor name alphabetically,
+  then arguments left to right, recursively.
+
+  Classes order `Var < Number < Atom < String < Compound` -- a real
+  string is its own class, distinct from atoms, matching SWI-Prolog's
+  own convention (ISO itself has no strings to place, since its own
+  double-quoted syntax is just a code-list).
   """
   @spec compare_order(term(), term()) :: :lt | :eq | :gt
   def compare_order(a, b) do
@@ -155,13 +165,15 @@ defmodule Episteme.Term do
   defp term_class(n) when is_number(n), do: 1
   defp term_class([]), do: 2
   defp term_class(a) when is_atom(a), do: 2
-  defp term_class(_compound_or_list), do: 3
+  defp term_class(s) when is_binary(s), do: 3
+  defp term_class(_compound_or_list), do: 4
 
   defp compare_within_class(0, %Var{ref: a}, %Var{ref: b}), do: compare_native(a, b)
   defp compare_within_class(1, a, b), do: compare_numbers(a, b)
   defp compare_within_class(2, a, b), do: compare_native(atom_sort_key(a), atom_sort_key(b))
+  defp compare_within_class(3, a, b), do: compare_native(a, b)
 
-  defp compare_within_class(3, a, b) do
+  defp compare_within_class(4, a, b) do
     {name_a, args_a} = deconstruct(a)
     {name_b, args_b} = deconstruct(b)
 
@@ -273,6 +285,7 @@ defmodule Episteme.Term do
 
   def to_text(atom) when is_atom(atom), do: Atom.to_string(atom)
   def to_text(number) when is_number(number), do: to_string(number)
+  def to_text(string) when is_binary(string), do: "\"" <> string <> "\""
   def to_text(other), do: inspect(other)
 
   defp to_text_list([h]), do: to_text(h)

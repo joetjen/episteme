@@ -46,7 +46,7 @@ defmodule Episteme.Engine do
   zero changes to Ichor itself.
   """
 
-  alias Episteme.Builtins.{Arithmetic, Exceptions, Io, Lists}
+  alias Episteme.Builtins.{Arithmetic, Exceptions, Io, Lists, Strings}
   alias Episteme.{Database, Term}
   alias Episteme.Term.{Compound, Var}
   alias Ichor.Backtrack.{Bindings, Tree}
@@ -299,6 +299,9 @@ defmodule Episteme.Engine do
   defp dispatch(%Compound{name: :is_list, args: [x]}, bindings, _db, _barrier),
     do: bool_goal(proper_list?(x, bindings), bindings)
 
+  defp dispatch(%Compound{name: :string, args: [x]}, bindings, _db, _barrier),
+    do: bool_goal(is_binary(Bindings.resolve(Term, bindings, x)), bindings)
+
   # -- arithmetic --
 
   defp dispatch(%Compound{name: :is, args: [result, expr]}, bindings, _db, _barrier) do
@@ -423,11 +426,12 @@ defmodule Episteme.Engine do
     builtin_clause_goal(head, body, db, bindings)
   end
 
-  # -- arithmetic / lists / io, then user-defined predicates --
+  # -- arithmetic / lists / strings / io, then user-defined predicates --
 
   defp dispatch(%Compound{name: name, args: args}, bindings, db, _barrier) do
     with :not_handled <- Arithmetic.dispatch(name, length(args), args),
          :not_handled <- Lists.dispatch(name, length(args), args),
+         :not_handled <- Strings.dispatch(name, length(args), args),
          :not_handled <- Io.dispatch(name, length(args), args) do
       solve_user_predicate(name, args, bindings, db)
     else
