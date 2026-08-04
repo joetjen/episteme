@@ -121,7 +121,7 @@ end
 
 - **`Episteme.Term`** — the term representation: atoms/numbers are
   plain Elixir atoms/integers/floats, lists are native Elixir lists
-  (decomposing as ISO's own `'.'/2` cons functor so unification can
+  (decomposing as ISO's own `.`/2 cons functor so unification can
   recurse into them), variables and compounds get dedicated structs.
 - **`Episteme.Database`** — clause storage, indexed by `{name, arity}`,
   storage strategy pluggable via `Episteme.Database.Backend` (in-memory

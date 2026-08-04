@@ -21,7 +21,7 @@ embed = fn goal -> %Compound{name: :{}, args: [goal]} end
 
 `c` is the same shorthand [EXAMPLES.md §0](EXAMPLES.md#0-shared-setup)
 uses. `embed` is new here: it wraps an ordinary goal as `{Goal}` —
-ISO's own `'{}'/1` term shape — the way you drop a plain predicate
+ISO's own `{}`/1 term shape — the way you drop a plain predicate
 call into the middle of a DCG body without it being treated as
 grammar.
 

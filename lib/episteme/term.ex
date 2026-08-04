@@ -46,12 +46,12 @@ defmodule Episteme.Term do
   def compound?(_), do: false
 
   @doc """
-  A non-empty native Elixir list decomposes as ISO's own `'.'/2` cons
-  functor (`[H|T]` <-> `'.'(H, T)`) -- the encoding that lets
+  A non-empty native Elixir list decomposes as ISO's own `.`/2 cons
+  functor (`[H|T]` <-> `.`(H, T)) -- the encoding that lets
   `Ichor.Backtrack.Bindings.unify/4` recurse into list structure at all
   (without this, `[H|T]` vs `[1,2,3]` would only ever compare via plain
   `==/2`, never binding `H`/`T`). `[]` is the atomic empty-list atom,
-  same as real Prolog -- not a `'.'/2` cell, so it stays out of
+  same as real Prolog -- not a `.`/2 cell, so it stays out of
   `compound?/1` above.
   """
   @impl true
@@ -141,7 +141,7 @@ defmodule Episteme.Term do
   as if its name were the two characters `[` `]`, same as any other
   atom); strings alphabetically by byte value, same comparator as
   atoms; compounds (a non-empty list
-  decomposes via the same `'.'/2` cons functor `compound?/1` uses
+  decomposes via the same `.`/2 cons functor `compound?/1` uses
   everywhere else) by arity first, then functor name alphabetically,
   then arguments left to right, recursively.
 

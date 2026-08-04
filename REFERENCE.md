@@ -470,7 +470,7 @@ with a float sorting before an integer of equal value (so `1.0` and
 `1`, unlike `equal/2`'s `==`, are never `order`-equal either — they
 just consistently sort float-before-int instead); atoms alphabetically
 by character code; compounds (a non-empty list decomposes via the same
-`'.'/2` cons functor used everywhere else) by arity first, then
+`.`/2 cons functor used everywhere else) by arity first, then
 functor name, then arguments left to right. `compare/3` is the one
 member of this family whose own name isn't ISO punctuation, so it
 keeps its ISO name unchanged: `compare(Order, A, B)` unifies `Order`
@@ -672,7 +672,7 @@ name/arity, and works in both directions:
 - **`Term` bound** — decomposes it. A compound gives its own name and
   argument count; an atomic term (atom or number) gives itself as
   `Name` with `Arity` 0. A non-empty list decomposes via the same
-  `'.'/2` cons functor `Term.compound?/1` uses everywhere else (`Name`
+  `.`/2 cons functor `Term.compound?/1` uses everywhere else (`Name`
   = `.`, `Arity` = 2); `[]` is atomic, same as any other atom.
 - **`Term` unbound** — builds a fresh term from `Name`/`Arity` instead.
   `Arity` 0 just unifies `Term` with `Name` as-is (whatever atomic
@@ -1564,7 +1564,7 @@ special-cased) all build on it, and `phrase/2,3` is how you *run* a
 DCG body (stored or not) as an ordinary goal.
 
 A practical subset of real DCG translation, not all of it: terminals
-(`[t1, ..., tn]`), an embedded plain goal (`{Goal}`, ISO's own `'{}'/1`
+(`[t1, ..., tn]`), an embedded plain goal (`{Goal}`, ISO's own `{}`/1
 term shape -- runs `Goal` without touching the list), `cut`, `and/2`,
 `or/2`, `if_then/2`, `if_then_else/3`, `not/1`, a bare nonterminal
 (atom or compound, any other name -- gets `S0`/`S` appended), and a
