@@ -109,6 +109,8 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 | `ignore(G)` | Like `once/1`, but never fails -- succeeds unchanged if `G` has no solution. |
 | `call(G, Extra...)` | Calls `G` with `Extra` args appended; cut-opaque. |
 | `findall(Template, G, List)` | Collects `Template` for every solution of `G` into `List` (`[]` if none). Cut-opaque, binds nothing else. |
+| `bagof(Template, G, List)` | Like `findall/3`, but fails (not `List = []`) on no solutions, and groups by `G`'s free variables (not in `Template`, not `Var^G`-quantified), backtracking one group per binding. |
+| `setof(Template, G, List)` | Like `bagof/3`, but each group's `List` is sorted + deduped by standard order, and groups are ordered by witness. |
 | `forall(Cond, Action)` | Succeeds iff every solution of `Cond` has a solution of `Action`. Cut-opaque, binds nothing. |
 
 ## Matching and comparing values (unification)

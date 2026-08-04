@@ -168,6 +168,14 @@ defmodule Episteme.Engine do
     forall_goal(cond_, action, bindings, db)
   end
 
+  defp dispatch(%Compound{name: :bagof, args: [template, g, bag]}, bindings, db, _barrier) do
+    aggregate_goal(template, g, bag, bindings, db, :bagof)
+  end
+
+  defp dispatch(%Compound{name: :setof, args: [template, g, bag]}, bindings, db, _barrier) do
+    aggregate_goal(template, g, bag, bindings, db, :setof)
+  end
+
   # -- higher-order list predicates --
 
   defp dispatch(%Compound{name: :include, args: [g, list, result]}, bindings, db, _barrier) do
@@ -685,6 +693,109 @@ defmodule Episteme.Engine do
         end
     end
   end
+
+  # `bagof(Template, Goal, Bag)`/`setof(Template, Goal, Bag)`: like
+  # findall/3, but (a) fail outright instead of succeeding with `[]`
+  # when `Goal` has no solutions, and (b) group solutions by the
+  # current bindings of `Goal`'s own "free" variables -- every
+  # variable `Goal` mentions that `Template` doesn't and that isn't
+  # existentially quantified via `Var^Goal` (`V1^V2^...^Goal` strips
+  # each `Vn` in turn) -- backtracking through one solution per
+  # distinct combination of free-variable values, unifying `Bag` with
+  # that group's own `Template` instances. `setof/3` additionally
+  # sorts (and dedups) each group's `Bag` by standard order of terms,
+  # via `Term.sort_unique/1`; `bagof/3` keeps first-solution order.
+  defp aggregate_goal(template, g, bag, bindings, db, kind) do
+    {existential_vars, inner_goal} = strip_existential(g, bindings)
+
+    witness_term = %Compound{
+      name: :"$witness",
+      args: free_variables(inner_goal, template, existential_vars)
+    }
+
+    inner_barrier = make_ref()
+    stream = guard_cut(goal(inner_goal, db, inner_barrier).(bindings), inner_barrier)
+    pairs = collect_witness_pairs(stream, witness_term, template)
+
+    case group_by_witness(pairs) do
+      [] ->
+        Tree.fail().(bindings)
+
+      groups ->
+        aggregate_disjunction(order_groups(groups, kind), witness_term, bag, kind).(bindings)
+    end
+  end
+
+  defp order_groups(groups, :bagof), do: groups
+
+  defp order_groups(groups, :setof) do
+    Enum.sort(groups, fn {w1, _}, {w2, _} -> Term.compare_order(w1, w2) != :gt end)
+  end
+
+  defp strip_existential(g, bindings) do
+    case Bindings.resolve(Term, bindings, g) do
+      %Compound{name: :^, args: [v, rest]} ->
+        {inner_vars, inner_goal} = strip_existential(rest, bindings)
+        {Term.term_variables(v) ++ inner_vars, inner_goal}
+
+      resolved ->
+        {[], resolved}
+    end
+  end
+
+  defp free_variables(inner_goal, template, existential_vars) do
+    excluded =
+      (Term.term_variables(template) ++ existential_vars)
+      |> Enum.map(& &1.ref)
+      |> MapSet.new()
+
+    inner_goal
+    |> Term.term_variables()
+    |> Enum.reject(&MapSet.member?(excluded, &1.ref))
+  end
+
+  defp collect_witness_pairs(stream, witness_term, template) do
+    case Tree.next(stream) do
+      :empty ->
+        []
+
+      {:solution, sol_bindings, rest} ->
+        pair =
+          {Term.resolve_deep(witness_term, sol_bindings),
+           Term.resolve_deep(template, sol_bindings)}
+
+        [pair | collect_witness_pairs(rest, witness_term, template)]
+    end
+  end
+
+  defp group_by_witness(pairs) do
+    Enum.reduce(pairs, [], fn {witness, template}, groups ->
+      case Enum.find_index(groups, fn {w, _templates} -> Term.structurally_equal?(w, witness) end) do
+        nil -> groups ++ [{witness, [template]}]
+        idx -> List.update_at(groups, idx, fn {w, templates} -> {w, templates ++ [template]} end)
+      end
+    end)
+  end
+
+  defp aggregate_disjunction(groups, witness_term, bag, kind) do
+    Enum.reduce(groups, Tree.fail(), fn group, acc ->
+      Tree.disjunction(acc, aggregate_group_goal(group, witness_term, bag, kind))
+    end)
+  end
+
+  defp aggregate_group_goal({witness, templates}, witness_term, bag, kind) do
+    fn bindings ->
+      with {:ok, b1} <- Bindings.unify(Term, bindings, witness_term, witness),
+           {:ok, b2} <- Bindings.unify(Term, b1, bag, finalize_group(templates, kind)) do
+        Tree.unit().(b2)
+      else
+        :fail -> Tree.fail().(bindings)
+      end
+    end
+  end
+
+  defp finalize_group(templates, :bagof), do: templates
+  defp finalize_group(templates, :setof), do: Term.sort_unique(templates)
 
   defp build_call(g, [], _bindings), do: g
 

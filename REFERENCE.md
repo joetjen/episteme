@@ -29,7 +29,7 @@ c = fn name, args -> %Compound{name: name, args: args} end
 
 - [Control constructs](#control-constructs) — `true`, `fail`/`false`,
   `cut`, `and`, `or`, `if_then`/`if_then_else`, `not`, `once`, `ignore`,
-  `call`, `findall`, `forall`
+  `call`, `findall`, `bagof`, `setof`, `forall`
 - [Matching and comparing values](#matching-and-comparing-values) —
   `unify`, `not_unify`, `unify_with_occurs_check`, `equal`, `not_equal`,
   standard order of terms (`order_less`, `order_greater`,
@@ -308,6 +308,56 @@ Episteme.query(c.(:findall, [fx, c.(:fruit, [fx]), Term.new_var("L")]), db)
 `findall/3`'s own template/goal; see [TUTORIAL.md §11](TUTORIAL.md#11-collecting-every-solution-findall-and-forall)
 for why a *named* variable used only there would come back in the
 answer too, still unfilled.)
+
+### `bagof/3` and `setof/3`
+
+Like `findall/3`, but two differences. First: zero solutions makes
+`bagof/3`/`setof/3` *fail outright*, not succeed with `List = []` --
+useful when "nothing matched" should be a failure your caller can
+branch on (`\+`, `;`, ...), not a value it has to inspect. Second: they
+group solutions by `Goal`'s own *free variables* -- every variable
+`Goal` mentions that `Template` doesn't, and that isn't existentially
+quantified away with `Var^Goal` -- backtracking through one solution
+per distinct combination of free-variable values, each one binding
+those free variables *and* `List` to that group's own results.
+
+```elixir
+db =
+  Database.new()
+  |> Database.add_fact(c.(:likes, [:mary, :apples]))
+  |> Database.add_fact(c.(:likes, [:mary, :pears]))
+  |> Database.add_fact(c.(:likes, [:john, :apples]))
+
+person = Term.new_var("Person")
+thing = Term.new_var()
+
+Episteme.query(c.(:bagof, [thing, c.(:likes, [person, thing]), Term.new_var("L")]), db)
+#=> {:ok, [%{"Person" => :mary, "L" => [:apples, :pears]}, %{"Person" => :john, "L" => [:apples]}]}
+```
+
+`Person` was never mentioned in `Template` (`thing`), so it becomes a
+grouping variable instead of ending up inside `List`. Wrap it in
+`Person^Goal` to fold every solution into one bag regardless of who
+likes what:
+
+```elixir
+person = Term.new_var()
+thing = Term.new_var()
+goal = c.(:^, [person, c.(:likes, [person, thing])])
+
+Episteme.query(c.(:bagof, [thing, goal, Term.new_var("L")]), db)
+#=> {:ok, [%{"L" => [:apples, :pears, :apples]}]}
+```
+
+`setof/3` is `bagof/3` plus `Term.sort_unique/1` applied to each
+group's own list (dropping duplicates, sorting by standard order of
+terms), and it also orders the groups themselves by their witness
+value -- `bagof/3` leaves both in first-solution order.
+
+```elixir
+Episteme.query(c.(:setof, [thing, goal, Term.new_var("L")]), db)
+#=> {:ok, [%{"L" => [:apples, :pears]}]}
+```
 
 ### `forall/2`
 

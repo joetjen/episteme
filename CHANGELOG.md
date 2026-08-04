@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bagof/3` and `setof/3`, completing the v0.3 aggregation family
+  alongside the existing `findall/3`. Unlike `findall/3`, both fail
+  outright (not `List = []`) when the goal has no solutions, and group
+  solutions by the goal's own free variables (every variable it
+  mentions that isn't in `Template` and isn't existentially quantified
+  via `Var^Goal`), backtracking one solution per distinct group.
+  `setof/3` additionally sorts and dedups each group (and orders the
+  groups themselves) by standard order of terms. Built on two new
+  `Episteme.Term` functions, `term_variables/1` (real Prolog's
+  `term_variables/2`, not itself exposed as a goal yet) and
+  `sort_by_order/1`/`sort_unique/1` (the latter two also now shared by
+  `msort/2`/`sort/2`, replacing what used to be private duplicate logic
+  in `Episteme.Builtins.Lists`). See
+  [REFERENCE.md](REFERENCE.md#bagof3-and-setof3).
+
 - Rounds out the dynamic-database family: `abolish/1` (unlike
   `retractall/1`, undefines the predicate too -- a later call raises
   `existence_error` again) and `dynamic/1` (declares a predicate
