@@ -378,6 +378,18 @@ defmodule Episteme.Engine do
     retractall_goal(head_pattern, bindings, db)
   end
 
+  defp dispatch(%Compound{name: :abolish, args: [indicator]}, bindings, db, _barrier) do
+    abolish_goal(indicator, bindings, db)
+  end
+
+  defp dispatch(%Compound{name: :dynamic, args: [spec]}, bindings, db, _barrier) do
+    dynamic_goal(spec, bindings, db)
+  end
+
+  defp dispatch(%Compound{name: :clause, args: [head, body]}, bindings, db, _barrier) do
+    builtin_clause_goal(head, body, db, bindings)
+  end
+
   # -- arithmetic / lists / io, then user-defined predicates --
 
   defp dispatch(%Compound{name: name, args: args}, bindings, db, _barrier) do
@@ -961,6 +973,106 @@ defmodule Episteme.Engine do
 
     Database.replace_clauses(db, name, arity, kept)
     Tree.unit().(bindings)
+  end
+
+  # `abolish(Name/Arity)`: unlike `retractall/1`, leaves the predicate
+  # genuinely undefined again -- a later plain call raises
+  # `existence_error` rather than just failing.
+  defp abolish_goal(indicator, bindings, db) do
+    case predicate_indicator(indicator, bindings) do
+      {:ok, name, arity} ->
+        Database.abolish(db, name, arity)
+        Tree.unit().(bindings)
+
+      :error ->
+        prolog_throw(Exceptions.type_error(:predicate_indicator, indicator))
+    end
+  end
+
+  # `dynamic(Name/Arity)` or `dynamic([Name/Arity, ...])`: marks each
+  # indicator defined without adding a clause, so a plain call fails
+  # (no matching clauses) instead of raising `existence_error`, and
+  # `assert`/`retract` can be used on it right away. A no-op for an
+  # indicator that already has clauses -- see `Database.declare_dynamic/3`.
+  defp dynamic_goal(spec, bindings, db) do
+    case Bindings.resolve(Term, bindings, spec) do
+      %Compound{name: :/} ->
+        case predicate_indicator(spec, bindings) do
+          {:ok, name, arity} ->
+            Database.declare_dynamic(db, name, arity)
+            Tree.unit().(bindings)
+
+          :error ->
+            prolog_throw(Exceptions.type_error(:predicate_indicator, spec))
+        end
+
+      list when is_list(list) ->
+        declare_all_dynamic(list, bindings, db)
+        Tree.unit().(bindings)
+
+      _not_an_indicator_or_list ->
+        prolog_throw(Exceptions.type_error(:predicate_indicator, spec))
+    end
+  end
+
+  defp declare_all_dynamic([], _bindings, _db), do: :ok
+
+  defp declare_all_dynamic([indicator | rest], bindings, db) do
+    case predicate_indicator(indicator, bindings) do
+      {:ok, name, arity} ->
+        Database.declare_dynamic(db, name, arity)
+        declare_all_dynamic(rest, bindings, db)
+
+      :error ->
+        prolog_throw(Exceptions.type_error(:predicate_indicator, indicator))
+    end
+  end
+
+  defp predicate_indicator(term, bindings) do
+    case Bindings.resolve(Term, bindings, term) do
+      %Compound{name: :/, args: [name, arity]}
+      when is_atom(name) and is_integer(arity) and arity >= 0 ->
+        {:ok, name, arity}
+
+      _other ->
+        :error
+    end
+  end
+
+  # `clause(Head, Body)`: enumerates every stored clause for `Head`'s
+  # own `{name, arity}` whose (freshened) head unifies with `Head`, one
+  # per backtrack, unifying `Body` with that clause's own (freshened)
+  # body -- the same `Term.fresh_copy/1` "rename apart together, via a
+  # throwaway $clause wrapper" trick `retract_goal/3`'s own
+  # `find_matching_clause/4` uses, so `Head`/`Body` share renamed
+  # variables correctly when a clause's head and body both reference
+  # the same one.
+  defp builtin_clause_goal(head, body, db, bindings) do
+    case Bindings.resolve(Term, bindings, head) do
+      %Var{} ->
+        prolog_throw(Exceptions.instantiation_error())
+
+      resolved_head ->
+        {name, arity} = Database.indicator(resolved_head)
+
+        Database.clauses_for(db, name, arity)
+        |> Enum.reduce(Tree.fail(), fn stored, acc ->
+          Tree.disjunction(acc, fn b -> unify_clause_pair(head, body, stored, b) end)
+        end)
+        |> then(& &1.(bindings))
+    end
+  end
+
+  defp unify_clause_pair(head, body, {stored_head, stored_body}, bindings) do
+    %Compound{args: [fresh_head, fresh_body]} =
+      Term.fresh_copy(%Compound{name: :"$clause", args: [stored_head, stored_body]})
+
+    with {:ok, b1} <- Bindings.unify(Term, bindings, head, fresh_head),
+         {:ok, b2} <- Bindings.unify(Term, b1, body, fresh_body) do
+      Tree.unit().(b2)
+    else
+      :fail -> Tree.fail().(bindings)
+    end
   end
 
   @spec prolog_throw(term()) :: no_return()

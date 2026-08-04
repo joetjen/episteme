@@ -4,8 +4,8 @@ defmodule Episteme.Database do
   clauses, `body` a single term (`true` for a fact, matching real
   Prolog's own internal `Head :- Body` shape) -- looked up by
   `Episteme.Engine` on every user-predicate call, and mutated in place by
-  `Episteme.Engine`'s `assert`/`asserta`/`assertz`/`retract`/`retractall`
-  dispatch. Populated either directly (`add_clause/2`/`add_fact/2`,
+  `Episteme.Engine`'s `assert`/`asserta`/`assertz`/`retract`/`retractall`/
+  `abolish`/`dynamic` dispatch. Populated either directly (`add_clause/2`/`add_fact/2`,
   building terms yourself with `Episteme.Term`) or via `consult_forms/2`,
   for any front-end that parses its own surface syntax into
   `{:fact, _}`/`{:rule, _, _}` forms (Aletheia's reader is one such
@@ -95,6 +95,30 @@ defmodule Episteme.Database do
 
   @spec defined?(t(), atom(), non_neg_integer()) :: boolean()
   def defined?(%__MODULE__{} = db, name, arity), do: db.backend.defined?(db.state, name, arity)
+
+  @doc """
+  Completely removes `{name, arity}` -- unlike `replace_clauses/4` with
+  `[]` (what `retractall/1` builds on), `defined?/3` becomes false
+  again afterward, so a later plain call raises `existence_error`
+  rather than just failing.
+  """
+  @spec abolish(t(), atom(), non_neg_integer()) :: t()
+  def abolish(%__MODULE__{} = db, name, arity) do
+    :ok = db.backend.abolish(db.state, name, arity)
+    db
+  end
+
+  @doc """
+  Marks `{name, arity}` as defined without adding a clause -- what
+  `dynamic/1` builds on. A later plain call to it fails (no matching
+  clauses) instead of raising `existence_error`, and `assert`/`retract`
+  can be used on it immediately. A no-op if it's already defined
+  (existing clauses are never touched).
+  """
+  @spec declare_dynamic(t(), atom(), non_neg_integer()) :: t()
+  def declare_dynamic(%__MODULE__{} = db, name, arity) do
+    if defined?(db, name, arity), do: db, else: replace_clauses(db, name, arity, [])
+  end
 
   @spec indicator(term()) :: indicator()
   def indicator(%Compound{name: name, args: args}), do: {name, length(args)}

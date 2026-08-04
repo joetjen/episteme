@@ -1,7 +1,8 @@
 defmodule Episteme.DynamicDatabaseTest do
   @moduledoc """
-  `assert`/`asserta`/`assertz`/`retract`/`retractall` exercised through
-  `Episteme.query/2`, the same way a caller actually uses them.
+  `assert`/`asserta`/`assertz`/`retract`/`retractall`/`abolish`/
+  `dynamic`/`clause` exercised through `Episteme.query/2`, the same way
+  a caller actually uses them.
   """
 
   use ExUnit.Case, async: true
@@ -131,6 +132,132 @@ defmodule Episteme.DynamicDatabaseTest do
       db = db([{:fact, c(:p, [1])}, {:fact, c(:p, [2])}])
 
       assert solutions(db, c(:retractall, [c(:p, [var()])])) == [%{}]
+    end
+  end
+
+  describe "abolish/1" do
+    test "removes clauses and undefines the predicate: a later call raises existence_error again" do
+      db = db([{:fact, c(:p, [1])}])
+
+      assert solutions(db, c(:abolish, [c(:/, [:p, 1])])) == [%{}]
+      assert {:error, %Compound{name: :error, args: [formal, _]}} = solutions(db, c(:p, [1]))
+      assert %Compound{name: :existence_error, args: [:procedure, _]} = formal
+    end
+
+    test "unlike retractall/1, defined?/3 goes back to false" do
+      db = db([{:fact, c(:p, [1])}])
+      solutions(db, c(:abolish, [c(:/, [:p, 1])]))
+
+      refute Episteme.Database.defined?(db, :p, 1)
+    end
+
+    test "a malformed indicator raises type_error(predicate_indicator, _)" do
+      assert {:error, %Compound{name: :error, args: [formal, _]}} =
+               solutions(db(), c(:abolish, [:not_an_indicator]))
+
+      assert %Compound{name: :type_error, args: [:predicate_indicator, :not_an_indicator]} =
+               formal
+    end
+  end
+
+  describe "dynamic/1" do
+    test "declares a predicate defined with zero clauses: a call fails, it doesn't raise existence_error" do
+      db = db()
+
+      assert solutions(db, c(:dynamic, [c(:/, [:counter, 1])])) == [%{}]
+      assert solutions(db, c(:counter, [var("X")])) == []
+    end
+
+    test "assert/1 works immediately afterward" do
+      db = db()
+      solutions(db, c(:dynamic, [c(:/, [:counter, 1])]))
+      solutions(db, c(:assertz, [c(:counter, [1])]))
+
+      assert solutions(db, c(:counter, [var("X")])) == [%{"X" => 1}]
+    end
+
+    test "a no-op when the predicate already has clauses -- existing clauses survive" do
+      db = db([{:fact, c(:p, [1])}])
+      solutions(db, c(:dynamic, [c(:/, [:p, 1])]))
+
+      assert solutions(db, c(:p, [var("X")])) == [%{"X" => 1}]
+    end
+
+    test "a list of indicators declares each one" do
+      db = db()
+      solutions(db, c(:dynamic, [[c(:/, [:a, 1]), c(:/, [:b, 2])]]))
+
+      assert solutions(db, c(:a, [var("_")])) == []
+      assert solutions(db, c(:b, [var("_"), var("_")])) == []
+    end
+
+    test "a malformed indicator raises type_error(predicate_indicator, _)" do
+      assert {:error, %Compound{name: :error, args: [formal, _]}} =
+               solutions(db(), c(:dynamic, [:not_an_indicator]))
+
+      assert %Compound{name: :type_error, args: [:predicate_indicator, :not_an_indicator]} =
+               formal
+    end
+  end
+
+  describe "clause/2" do
+    test "enumerates every matching clause's head/body, one per backtrack" do
+      x = var("X")
+
+      db =
+        db([
+          {:fact, c(:p, [1])},
+          {:rule, c(:p, [x]), c(:>, [x, 10])},
+          {:fact, c(:p, [3])}
+        ])
+
+      results = solutions(db, c(:clause, [c(:p, [var("Arg")]), var("Body")]))
+
+      assert length(results) == 3
+      assert %{"Arg" => 1, "Body" => true} in results
+      assert %{"Arg" => 3, "Body" => true} in results
+
+      assert Enum.any?(results, fn
+               %{"Arg" => %Episteme.Term.Var{}, "Body" => %Compound{name: :>, args: [_, 10]}} ->
+                 true
+
+               _ ->
+                 false
+             end)
+    end
+
+    test "Head and Body share renamed variables from the same clause" do
+      x = var("X")
+      y = var("Y")
+      db = db([{:rule, c(:double, [x, y]), c(:is, [y, c(:*, [x, 2])])}])
+
+      h1 = var("H1")
+      h2 = var("H2")
+
+      assert [%{"H1" => bound_h1, "H2" => bound_h2, "B" => body}] =
+               solutions(db, c(:clause, [c(:double, [h1, h2]), var("B")]))
+
+      assert %Episteme.Term.Var{} = bound_h1
+      assert %Episteme.Term.Var{} = bound_h2
+
+      assert %Compound{
+               name: :is,
+               args: [^bound_h2, %Compound{name: :*, args: [^bound_h1, 2]}]
+             } = body
+    end
+
+    test "an unbound Head raises instantiation_error" do
+      assert {:error, %Compound{name: :error, args: [:instantiation_error, _]}} =
+               solutions(db(), c(:clause, [var("H"), var("B")]))
+    end
+
+    test "no matching clause just fails" do
+      db = db([{:fact, c(:p, [1])}])
+      assert solutions(db, c(:clause, [c(:p, [2]), var("B")])) == []
+    end
+
+    test "an undefined predicate just fails, not existence_error" do
+      assert solutions(db(), c(:clause, [c(:nonexistent, [1]), var("B")])) == []
     end
   end
 end

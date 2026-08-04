@@ -45,4 +45,23 @@ defmodule Episteme.DatabaseDetsTest do
     refute Database.defined?(db, :q, 1)
     Database.close(db)
   end
+
+  test "abolish/3 behaves like the Ets backend: defined?/3 goes back to false", %{path: file} do
+    db =
+      Database.new(backend: Dets, file: file)
+      |> Database.add_fact(%Compound{name: :p, args: [1]})
+      |> Database.abolish(:p, 1)
+
+    refute Database.defined?(db, :p, 1)
+    assert Database.clauses_for(db, :p, 1) == []
+    Database.close(db)
+  end
+
+  test "declare_dynamic/3 behaves like the Ets backend: defined with zero clauses", %{path: file} do
+    db = Database.new(backend: Dets, file: file) |> Database.declare_dynamic(:counter, 1)
+
+    assert Database.defined?(db, :counter, 1)
+    assert Database.clauses_for(db, :counter, 1) == []
+    Database.close(db)
+  end
 end

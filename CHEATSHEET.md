@@ -202,6 +202,9 @@ rather than escaping as a raw Elixir exception.
 | `asserta(Clause)` | Same, but prepends. |
 | `retract(Clause)` | Removes the *first* stored clause whose head and body both unify with `Clause`; keeps the resulting bindings. Fails (no mutation) if nothing unifies. Deterministic on success — does not backtrack into further matches. |
 | `retractall(Head)` | Removes every clause whose head unifies with `Head`. Always succeeds, binds nothing, and — like real Prolog — leaves the predicate *defined* (with zero clauses) rather than undefined, so later calls fail rather than raising `existence_error`. |
+| `abolish(Name/Arity)` | Unlike `retractall/1`, undefines the predicate too -- a later call raises `existence_error` again. |
+| `dynamic(Name/Arity)` (or `dynamic([Ind, ...])`) | Declares defined with zero clauses, so a call fails instead of raising `existence_error`. No-op if it already has clauses. |
+| `clause(Head, Body)` | Enumerates every stored clause for `Head`'s `{name, arity}` whose head unifies with `Head`, one per backtrack (`Body = true` for a fact). `Head` must be bound. Undefined predicate just fails. |
 
 Effects are visible immediately to every later call against the same
 `Database.t()`, including from separate `Episteme.query/2` calls, and are

@@ -40,6 +40,12 @@ defmodule Episteme.Database.Backends.Ets do
   def defined?(table, name, arity), do: :ets.member(table, {name, arity})
 
   @impl true
+  def abolish(table, name, arity) do
+    :ets.delete(table, {name, arity})
+    :ok
+  end
+
+  @impl true
   def sync(_table), do: :ok
 
   @impl true
