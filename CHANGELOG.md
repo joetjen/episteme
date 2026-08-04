@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The rest of the v0.2 list-predicate family: `msort/2`, `sort/2`,
+  `permutation/2`, `sum_list/2`, `max_list/2`, `min_list/2`, and
+  `list_to_set/2` (pure operations, in `Episteme.Builtins.Lists`, all
+  built on `Term.compare_order/2`) alongside `include/3`, `exclude/3`,
+  `foldl/4` (plus `/5`/`/6` for 2–3 lists in lockstep), and
+  `maplist/2..N` (higher-order -- these call a `Goal` per element via
+  the same mechanism as `call/N`, so they live directly in
+  `Episteme.Engine`, next to `call/N` itself, not in a Builtins
+  module). See
+  [REFERENCE.md](REFERENCE.md#higher-order-list-predicates).
 - Standard order of terms: `order_less/2`, `order_greater/2`,
   `order_less_or_equal/2`, `order_greater_or_equal/2` (real Prolog
   `@<`, `@>`, `@=<`, `@>=`), and `compare/3` (already a plain word in

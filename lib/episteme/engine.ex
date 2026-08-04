@@ -164,6 +164,27 @@ defmodule Episteme.Engine do
     forall_goal(cond_, action, bindings, db)
   end
 
+  # -- higher-order list predicates --
+
+  defp dispatch(%Compound{name: :include, args: [g, list, result]}, bindings, db, _barrier) do
+    filter_goal(g, list, result, db, bindings, true)
+  end
+
+  defp dispatch(%Compound{name: :exclude, args: [g, list, result]}, bindings, db, _barrier) do
+    filter_goal(g, list, result, db, bindings, false)
+  end
+
+  defp dispatch(%Compound{name: :foldl, args: [g | rest]}, bindings, db, _barrier)
+       when length(rest) >= 3 do
+    {lists, [v0, v]} = Enum.split(rest, length(rest) - 2)
+    foldl_goal(g, lists, v0, v, db, bindings)
+  end
+
+  defp dispatch(%Compound{name: :maplist, args: [g | lists]}, bindings, db, _barrier)
+       when lists != [] do
+    maplist_goal(g, lists, db, bindings)
+  end
+
   # -- unification / comparison --
 
   defp dispatch(%Compound{name: :unify, args: [a, b]}, bindings, _db, _barrier) do
@@ -623,6 +644,161 @@ defmodule Episteme.Engine do
       %Var{} -> prolog_throw(Exceptions.instantiation_error())
     end
   end
+
+  # `include/3`/`exclude/3`: `Goal` is called once per element, cut-opaque
+  # (own fresh barrier per call, same as `call/N`), as a plain
+  # existence check via `Tree.next/1` -- exactly `negation_as_failure/3`'s
+  # own pattern. Neither predicate propagates bindings `Goal` makes back
+  # into the kept elements themselves; they only test membership.
+  defp filter_goal(g, list, result, db, bindings, keep_on_success) do
+    case list_elements(list, bindings) do
+      {:ok, elements} ->
+        kept =
+          Enum.filter(elements, fn el ->
+            goal_succeeds?(g, [el], db, bindings) == keep_on_success
+          end)
+
+        unify_or_fail(bindings, result, kept)
+
+      :error ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp goal_succeeds?(g, extra_args, db, bindings) do
+    built = build_call(g, extra_args, bindings)
+    inner_barrier = make_ref()
+    stream = guard_cut(goal(built, db, inner_barrier).(bindings), inner_barrier)
+
+    case Tree.next(stream) do
+      {:solution, _bindings, _rest} -> true
+      :empty -> false
+    end
+  end
+
+  # A proper list's elements, as-is (not resolved) -- callers pass these
+  # straight into a built `call/N` goal, so an element that's still an
+  # unbound variable stays one, exactly like any other goal argument.
+  defp list_elements(list, bindings) do
+    case Bindings.resolve(Term, bindings, list) do
+      [] ->
+        {:ok, []}
+
+      [h | t] ->
+        case list_elements(t, bindings) do
+          {:ok, rest} -> {:ok, [h | rest]}
+          :error -> :error
+        end
+
+      _not_a_proper_list ->
+        :error
+    end
+  end
+
+  defp and_goal(a, b), do: %Compound{name: :and, args: [a, b]}
+
+  # `foldl(Goal, List1, ..., ListN, V0, V)`: every list argument must
+  # already be a proper, bound list (unlike `maplist/N` below, this one
+  # has no "generate an unbound list" mode) -- builds one right-nested
+  # `and/2` chain of `call(Goal, Elem1_i, ..., ElemN_i, AccIn_i,
+  # AccOut_i)` per row, threading each row's `AccOut` into the next
+  # row's `AccIn`, then dispatches the whole tree through the ordinary
+  # `goal/3` machinery (real backtracking through every row's own
+  # alternative solutions, for free, the same way `,`/2 always has).
+  defp foldl_goal(g, lists, v0, v, db, bindings) do
+    resolved = Enum.map(lists, &list_elements(&1, bindings))
+
+    if Enum.all?(resolved, &match?({:ok, _}, &1)) do
+      element_lists = Enum.map(resolved, fn {:ok, els} -> els end)
+      run_foldl(g, element_lists, v0, v, db, bindings)
+    else
+      Tree.fail().(bindings)
+    end
+  end
+
+  defp run_foldl(g, element_lists, v0, v, db, bindings) do
+    case Enum.uniq(Enum.map(element_lists, &length/1)) do
+      [_same_length] ->
+        rows = transpose(element_lists)
+        {body, final_acc} = build_foldl_conjunction(g, rows, v0)
+        full_goal = and_goal(body, %Compound{name: :unify, args: [v, final_acc]})
+        inner_barrier = make_ref()
+        guard_cut(goal(full_goal, db, inner_barrier).(bindings), inner_barrier)
+
+      [] ->
+        unify_or_fail(bindings, v, v0)
+
+      _mismatched_lengths ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp build_foldl_conjunction(_g, [], v0), do: {true, v0}
+
+  defp build_foldl_conjunction(g, [row | rows], v0) do
+    acc_out = Term.new_var("_")
+    step = %Compound{name: :call, args: [g | row ++ [v0, acc_out]]}
+    {rest, final_acc} = build_foldl_conjunction(g, rows, acc_out)
+    {and_goal(step, rest), final_acc}
+  end
+
+  # `maplist(Goal, List1, ..., ListN)`: at least one list must already
+  # be a proper, bound list, fixing the row count -- any other list
+  # argument that isn't yet bound gets unified with a fresh list of
+  # that many brand-new variables first (same "generate a list of fresh
+  # variables from a known length" shape `length/2` already has, in
+  # Episteme.Builtins.Lists), then the same "one and/2 chain of call/N
+  # per row" tree `foldl_goal/6` builds, minus the accumulator.
+  defp maplist_goal(g, lists, db, bindings) do
+    resolved = Enum.map(lists, &list_elements(&1, bindings))
+
+    case known_length(resolved) do
+      {:ok, n} ->
+        {element_lists, prereqs} = materialize_lists(lists, resolved, n)
+        rows = transpose(element_lists)
+        body = Enum.reduce(prereqs, build_call_conjunction(g, rows), &and_goal/2)
+        inner_barrier = make_ref()
+        guard_cut(goal(body, db, inner_barrier).(bindings), inner_barrier)
+
+      :error ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp known_length(resolved) do
+    lengths =
+      resolved
+      |> Enum.filter(&match?({:ok, _}, &1))
+      |> Enum.map(fn {:ok, els} -> length(els) end)
+
+    case Enum.uniq(lengths) do
+      [n] -> {:ok, n}
+      _no_or_conflicting_lengths -> :error
+    end
+  end
+
+  defp materialize_lists(lists, resolved, n) do
+    Enum.zip(lists, resolved)
+    |> Enum.map(fn
+      {_list_term, {:ok, els}} ->
+        {els, nil}
+
+      {list_term, :error} ->
+        fresh = for(_ <- 1..n, do: Term.new_var("_"))
+        {fresh, %Compound{name: :unify, args: [list_term, fresh]}}
+    end)
+    |> Enum.unzip()
+    |> then(fn {element_lists, prereqs} -> {element_lists, Enum.reject(prereqs, &is_nil/1)} end)
+  end
+
+  defp build_call_conjunction(_g, []), do: true
+  defp build_call_conjunction(g, [row]), do: %Compound{name: :call, args: [g | row]}
+
+  defp build_call_conjunction(g, [row | rows]) do
+    and_goal(%Compound{name: :call, args: [g | row]}, build_call_conjunction(g, rows))
+  end
+
+  defp transpose(lists), do: lists |> Enum.zip() |> Enum.map(&Tuple.to_list/1)
 
   defp catch_goal(g, catcher, recovery, bindings, db, barrier) do
     inner_barrier = make_ref()

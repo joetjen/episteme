@@ -46,7 +46,10 @@ c = fn name, args -> %Compound{name: name, args: args} end
 - [Dynamic database](#dynamic-database) — `assert`, `asserta`,
   `assertz`, `retract`, `retractall`
 - [Lists](#lists) — `length`, `append`, `member`, `reverse`, `nth0`,
-  `nth1`, `last`
+  `nth1`, `last`, `msort`, `sort`, `permutation`, `sum_list`,
+  `max_list`, `min_list`, `list_to_set`
+- [Higher-order list predicates](#higher-order-list-predicates) —
+  `include`, `exclude`, `foldl`, `maplist`
 - [I/O](#io) — `write`, `writeln`, `print`, `nl`
 
 A note before diving in: every goal name below is a plain English word
@@ -982,6 +985,123 @@ Episteme.query(c.(:last, [[:a, :b, :c], Term.new_var("X")]), Database.new())
 
 Episteme.query(c.(:last, [[], Term.new_var("X")]), Database.new())
 #=> {:ok, []}
+```
+
+### `msort/2` and `sort/2`
+
+Both sort by the [standard order of terms](#matching-and-comparing-values),
+not just numeric order — `msort/2` keeps duplicates, `sort/2` also
+removes any term that standard-order-compares equal to its neighbor
+once sorted (not plain `==` — `1` and `1.0` are equal in *value* but
+never merged, since they're never `:eq` in standard order either; see
+`compare/3`'s own note on this).
+
+```elixir
+Episteme.query(c.(:msort, [[3, 1, 2, 1], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [1, 1, 2, 3]}]}
+
+Episteme.query(c.(:sort, [[3, 1, 2, 1], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [1, 2, 3]}]}
+```
+
+### `permutation/2`
+
+`permutation(List, Perm)` enumerates every reordering of `List`, one
+per backtrack (`N!` of them for a list of length `N` — inherently
+expensive for anything but a small list, the same as in any Prolog).
+`List` must already be bound.
+
+```elixir
+Episteme.query(c.(:permutation, [[1, 2], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [1, 2]}, %{"X" => [2, 1]}]}
+```
+
+### `sum_list/2`, `max_list/2`, `min_list/2`
+
+Fold a list of numbers down to their sum, maximum, or minimum.
+`sum_list([], Sum)` gives `Sum = 0` (the identity); `max_list/2` and
+`min_list/2` both fail on an empty list instead — there's no
+extremum to report.
+
+```elixir
+Episteme.query(c.(:sum_list, [[1, 2, 3], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => 6}]}
+
+Episteme.query(c.(:max_list, [[3, 1, 2], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => 3}]}
+```
+
+### `list_to_set/2`
+
+Removes duplicates (by standard order, same as `sort/2`), but keeps
+first-occurrence order instead of sorting.
+
+```elixir
+Episteme.query(c.(:list_to_set, [[3, 1, 3, 2, 1], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [3, 1, 2]}]}
+```
+
+---
+
+## Higher-order list predicates
+
+`include/3`, `exclude/3`, `foldl/4+`, and `maplist/2+` all take a
+`Goal` as their first argument and call it — via the same mechanism
+`call/N` uses — once per list element (or once per matching row,
+across several lists in lockstep), each call cut-opaque, exactly like
+`call/N` itself.
+
+### `include/3` and `exclude/3`
+
+`include(Goal, List, Included)` keeps every element for which
+`call(Goal, Elem)` succeeds at least once; `exclude/3` keeps the
+elements where it *doesn't*. Neither propagates any bindings `Goal`
+makes back into the result — they're pure membership tests, run once
+per element, first-solution-only.
+
+```elixir
+x = Term.new_var("X")
+positive_db =
+  Database.new() |> Database.consult_forms([{:rule, c.(:positive, [x]), c.(:>, [x, 0])}])
+
+Episteme.query(c.(:include, [:positive, [1, -2, 3, -4], Term.new_var("L")]), positive_db)
+#=> {:ok, [%{"L" => [1, 3]}]}
+```
+
+### `foldl/4`, `foldl/5`, `foldl/6` (1–3 lists)
+
+`foldl(Goal, List, V0, V)` threads an accumulator through `Goal`,
+called as `call(Goal, Elem, AccIn, AccOut)` for each element in turn —
+`V0` seeds the first call's `AccIn`, `V` unifies with the last call's
+`AccOut` (or with `V0` directly, for an empty list). `foldl/5`/`foldl/6`
+walk two or three lists in lockstep instead of one, all of which must
+already be bound to the same length.
+
+```elixir
+x = Term.new_var("X")
+a0 = Term.new_var("A0")
+a = Term.new_var("A")
+add_db =
+  Database.new() |> Database.consult_forms([{:rule, c.(:add, [x, a0, a]), c.(:is, [a, c.(:+, [a0, x])])}])
+
+Episteme.query(c.(:foldl, [:add, [1, 2, 3, 4], 0, Term.new_var("Sum")]), add_db)
+#=> {:ok, [%{"Sum" => 10}]}
+```
+
+### `maplist/2` through `maplist/N`
+
+`maplist(Goal, List1, ..., ListN)` succeeds iff `call(Goal, E1_i, ...,
+EN_i)` succeeds for every row `i` across the `N` lists in lockstep. At
+least one list must already be bound (fixing the row count); any other
+list left unbound is unified with a fresh list of that many
+independent variables first, so a call-mode `Goal` can fill it in.
+
+```elixir
+Episteme.query(c.(:maplist, [:positive, [1, 2, 3]]), positive_db)
+#=> {:ok, [%{}]}   -- every element is positive
+
+Episteme.query(c.(:maplist, [:positive, [1, -2, 3]]), positive_db)
+#=> {:ok, []}   -- -2 isn't
 ```
 
 ---

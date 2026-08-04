@@ -18,6 +18,13 @@ defmodule Episteme.Builtins.Lists do
   def dispatch(:nth0, 3, [i, list, e]), do: fn bindings -> nth_goal(i, list, e, bindings, 0) end
   def dispatch(:nth1, 3, [i, list, e]), do: fn bindings -> nth_goal(i, list, e, bindings, 1) end
   def dispatch(:last, 2, [list, e]), do: fn bindings -> last_goal(list, e, bindings) end
+  def dispatch(:msort, 2, [list, sorted]), do: fn b -> msort_goal(list, sorted, b) end
+  def dispatch(:sort, 2, [list, sorted]), do: fn b -> sort_goal(list, sorted, b) end
+  def dispatch(:permutation, 2, [a, b]), do: fn bindings -> permutation_goal(a, b, bindings) end
+  def dispatch(:sum_list, 2, [list, sum]), do: fn b -> sum_list_goal(list, sum, b) end
+  def dispatch(:max_list, 2, [list, max]), do: fn b -> max_list_goal(list, max, b) end
+  def dispatch(:min_list, 2, [list, min]), do: fn b -> min_list_goal(list, min, b) end
+  def dispatch(:list_to_set, 2, [list, set]), do: fn b -> list_to_set_goal(list, set, b) end
   def dispatch(_, _, _), do: :not_handled
 
   defp unify_goal(a, b, bindings) do
@@ -175,6 +182,132 @@ defmodule Episteme.Builtins.Lists do
       [] -> Tree.fail().(bindings)
       resolved when is_list(resolved) -> unify_goal(e, List.last(resolved), bindings)
       _ -> Tree.fail().(bindings)
+    end
+  end
+
+  # `msort/2`/`sort/2`/`permutation/2`/`sum_list/2`/`max_list/2`/
+  # `min_list/2`/`list_to_set/2` all need every element's actual value,
+  # not just the list spine `resolved_list/2` (shallow) resolves --
+  # `proper_length/2` (already above) both confirms properness and
+  # gives a place to plug in a full `Term.resolve_deep/2` once we know
+  # the walk won't hit a non-list tail partway through.
+  defp proper_elements(list, bindings) do
+    case proper_length(list, bindings) do
+      {:ok, _} -> {:ok, Term.resolve_deep(list, bindings)}
+      :error -> :error
+    end
+  end
+
+  defp msort_goal(list, sorted, bindings) do
+    case proper_elements(list, bindings) do
+      {:ok, elements} ->
+        unify_goal(sorted, Enum.sort(elements, &(Term.compare_order(&1, &2) != :gt)), bindings)
+
+      :error ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  # Like `msort/2`, but also drops every term that standard-order-compares
+  # `:eq` to its predecessor once sorted -- not plain Elixir `==`, which
+  # would wrongly conflate `1` and `1.0` (equal by `==`, but never `:eq`
+  # in standard order -- see `Term.compare_order/2`'s own float-before-
+  # integer tie-break).
+  defp sort_goal(list, sorted, bindings) do
+    case proper_elements(list, bindings) do
+      {:ok, elements} ->
+        deduped =
+          elements
+          |> Enum.sort(&(Term.compare_order(&1, &2) != :gt))
+          |> dedup_by_order()
+
+        unify_goal(sorted, deduped, bindings)
+
+      :error ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp dedup_by_order([]), do: []
+  defp dedup_by_order([x]), do: [x]
+
+  defp dedup_by_order([a, b | rest]) do
+    if Term.compare_order(a, b) == :eq do
+      dedup_by_order([a | rest])
+    else
+      [a | dedup_by_order([b | rest])]
+    end
+  end
+
+  defp permutation_goal(a, b, bindings) do
+    case proper_elements(a, bindings) do
+      {:ok, elements} ->
+        elements
+        |> permutations()
+        |> Enum.reduce(Tree.fail(), fn perm, acc ->
+          Tree.disjunction(acc, fn bindings -> unify_goal(b, perm, bindings) end)
+        end)
+        |> then(& &1.(bindings))
+
+      :error ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp permutations([]), do: [[]]
+  defp permutations(list), do: for(x <- list, rest <- permutations(list -- [x]), do: [x | rest])
+
+  defp sum_list_goal(list, sum, bindings) do
+    case proper_elements(list, bindings) do
+      {:ok, elements} ->
+        if Enum.all?(elements, &is_number/1) do
+          unify_goal(sum, Enum.sum(elements), bindings)
+        else
+          Tree.fail().(bindings)
+        end
+
+      :error ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp max_list_goal(list, max, bindings), do: extremum_goal(list, max, bindings, &Enum.max/1)
+  defp min_list_goal(list, min, bindings), do: extremum_goal(list, min, bindings, &Enum.min/1)
+
+  # `max_list([], _)`/`min_list([], _)` fail -- an empty list has no
+  # extremum -- unlike `sum_list([], Sum)`, where `Sum = 0` is a
+  # perfectly good answer (`Enum.sum([]) == 0` already gives that for
+  # free, no special-casing needed above).
+  defp extremum_goal(list, result, bindings, pick) do
+    case proper_elements(list, bindings) do
+      {:ok, [_ | _] = elements} ->
+        if Enum.all?(elements, &is_number/1) do
+          unify_goal(result, pick.(elements), bindings)
+        else
+          Tree.fail().(bindings)
+        end
+
+      _empty_or_improper ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  # Keeps first-occurrence order (unlike `sort/2`, which also sorts) --
+  # `O(n^2)`, fine at this project's "need-first" scale.
+  defp list_to_set_goal(list, set, bindings) do
+    case proper_elements(list, bindings) do
+      {:ok, elements} ->
+        deduped =
+          elements
+          |> Enum.reduce([], fn el, acc ->
+            if Enum.any?(acc, &(Term.compare_order(&1, el) == :eq)), do: acc, else: [el | acc]
+          end)
+          |> Enum.reverse()
+
+        unify_goal(set, deduped, bindings)
+
+      :error ->
+        Tree.fail().(bindings)
     end
   end
 end

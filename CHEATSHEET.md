@@ -218,6 +218,24 @@ Effects are visible immediately to every later call against the same
 | `nth0(Index, List, Elem)` | 0-based. `Index` unbound enumerates every `{index, element}` pair. |
 | `nth1(Index, List, Elem)` | 1-based, same modes as `nth0/3`. |
 | `last(List, Elem)` | Fails on `[]`. |
+| `msort(List, Sorted)` | Sorts by standard order of terms, keeps duplicates. |
+| `sort(List, Sorted)` | Sorts and removes duplicates (`compare/3 == =`, not plain `==`). |
+| `permutation(List, Perm)` | Enumerates every reordering, `N!` of them. `List` must be bound. |
+| `sum_list(List, Sum)` | `Sum = 0` for `[]`. |
+| `max_list(List, Max)`, `min_list(List, Min)` | Fail on `[]`. |
+| `list_to_set(List, Set)` | Dedups, keeps first-occurrence order (unsorted). |
+
+## Higher-order list predicates
+
+`Goal` is called via the same mechanism as `call/N`, once per element
+(or per row, across lists in lockstep), cut-opaque.
+
+| Goal | Meaning |
+|---|---|
+| `include(Goal, List, Kept)` | Elements where `call(Goal, Elem)` succeeds. |
+| `exclude(Goal, List, Kept)` | Elements where it doesn't. |
+| `foldl(Goal, List, V0, V)` (also `/5`, `/6` for 2–3 lists) | Threads an accumulator: `call(Goal, Elem, AccIn, AccOut)` per element. |
+| `maplist(Goal, List1, ..., ListN)` | Succeeds iff `call(Goal, E1_i, ..., EN_i)` succeeds for every row. At least one list must be bound; others get built fresh. |
 
 ## I/O
 

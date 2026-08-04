@@ -59,4 +59,57 @@ defmodule Episteme.ListsTest do
     assert solutions(empty, c(:last, [[:a, :b, :c], var("X")])) == [%{"X" => :c}]
     assert solutions(empty, c(:last, [[], var("X")])) == []
   end
+
+  describe "msort/2" do
+    test "sorts by standard order of terms, keeping duplicates" do
+      assert solutions(db(), c(:msort, [[3, 1, 2, 1], var("X")])) == [%{"X" => [1, 1, 2, 3]}]
+    end
+
+    test "an unbound or improper list fails" do
+      assert solutions(db(), c(:msort, [var("L"), var("X")])) == []
+      assert solutions(db(), c(:msort, [:not_a_list, var("X")])) == []
+    end
+  end
+
+  describe "sort/2" do
+    test "sorts and removes duplicates by standard order" do
+      assert solutions(db(), c(:sort, [[3, 1, 2, 1], var("X")])) == [%{"X" => [1, 2, 3]}]
+    end
+
+    test "1 and 1.0 are equal in value but never merged (float precedes int)" do
+      assert solutions(db(), c(:sort, [[1, 1.0], var("X")])) == [%{"X" => [1.0, 1]}]
+    end
+  end
+
+  test "permutation/2 enumerates every ordering" do
+    result = solutions(db(), c(:permutation, [[1, 2, 3], var("X")]))
+    assert length(result) == 6
+    assert %{"X" => [1, 2, 3]} in result
+    assert %{"X" => [3, 2, 1]} in result
+    assert solutions(db(), c(:permutation, [[], var("X")])) == [%{"X" => []}]
+  end
+
+  describe "sum_list/2, max_list/2, min_list/2" do
+    test "sum_list/2, including the empty-list identity" do
+      assert solutions(db(), c(:sum_list, [[1, 2, 3], var("X")])) == [%{"X" => 6}]
+      assert solutions(db(), c(:sum_list, [[], var("X")])) == [%{"X" => 0}]
+    end
+
+    test "max_list/2 and min_list/2" do
+      assert solutions(db(), c(:max_list, [[3, 1, 2], var("X")])) == [%{"X" => 3}]
+      assert solutions(db(), c(:min_list, [[3, 1, 2], var("X")])) == [%{"X" => 1}]
+    end
+
+    test "max_list/2 and min_list/2 fail on an empty list" do
+      assert solutions(db(), c(:max_list, [[], var("X")])) == []
+      assert solutions(db(), c(:min_list, [[], var("X")])) == []
+    end
+  end
+
+  describe "list_to_set/2" do
+    test "removes duplicates, preserving first-occurrence order (not sorted)" do
+      assert solutions(db(), c(:list_to_set, [[3, 1, 3, 2, 1], var("X")])) ==
+               [%{"X" => [3, 1, 2]}]
+    end
+  end
 end
