@@ -31,7 +31,9 @@ c = fn name, args -> %Compound{name: name, args: args} end
   `cut`, `and`, `or`, `if_then`/`if_then_else`, `not`, `once`, `call`,
   `findall`, `forall`
 - [Matching and comparing values](#matching-and-comparing-values) —
-  `unify`, `not_unify`, `equal`, `not_equal`, `copy_term`
+  `unify`, `not_unify`, `equal`, `not_equal`, standard order of terms
+  (`order_less`, `order_greater`, `order_less_or_equal`,
+  `order_greater_or_equal`, `compare`), `copy_term`
 - [Type checks](#type-checks) — `var`, `nonvar`, `atom`, `atomic`,
   `number`, `integer`, `float`, `compound`, `callable`, `is_list`,
   `ground`
@@ -361,6 +363,35 @@ The opposite of `equal/2` — succeeds exactly when `equal/2` would fail.
 ```elixir
 Episteme.query(c.(:not_equal, [1, 1.0]), Database.new())
 #=> {:ok, [%{}]}
+```
+
+### Standard order of terms: `order_less/2`, `order_greater/2`, `order_less_or_equal/2`, `order_greater_or_equal/2` (real Prolog: `@<`, `@>`, `@=<`, `@>=`), and `compare/3`
+
+A total order over *every* term, not just numbers — `Var < Number <
+Atom < Compound`. Within a class: variables order by reference identity
+(consistent within one run, arbitrary across runs); numbers by value,
+with a float sorting before an integer of equal value (so `1.0` and
+`1`, unlike `equal/2`'s `==`, are never `order`-equal either — they
+just consistently sort float-before-int instead); atoms alphabetically
+by character code; compounds (a non-empty list decomposes via the same
+`'.'/2` cons functor used everywhere else) by arity first, then
+functor name, then arguments left to right. `compare/3` is the one
+member of this family whose own name isn't ISO punctuation, so it
+keeps its ISO name unchanged: `compare(Order, A, B)` unifies `Order`
+with the atom `<`, `=`, or `>`.
+
+```elixir
+Episteme.query(c.(:order_less, [1.0, 1]), Database.new())
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:compare, [Term.new_var("O"), :a, :b]), Database.new())
+#=> {:ok, [%{"O" => :<}]}
+
+Episteme.query(
+  c.(:compare, [Term.new_var("O"), c.(:f, [1]), c.(:f, [1, 2])]),
+  Database.new()
+)
+#=> {:ok, [%{"O" => :<}]}   -- arity 1 sorts before arity 2, regardless of args
 ```
 
 ### `copy_term/2`

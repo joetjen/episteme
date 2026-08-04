@@ -186,6 +186,24 @@ defmodule Episteme.Engine do
   defp dispatch(%Compound{name: :not_equal, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(not structurally_equal?(a, b, bindings), bindings)
 
+  # -- standard order of terms (real Prolog: @<, @>, @=<, @>=, compare/3) --
+
+  defp dispatch(%Compound{name: :order_less, args: [a, b]}, bindings, _db, _barrier),
+    do: bool_goal(order_compare(a, b, bindings) == :lt, bindings)
+
+  defp dispatch(%Compound{name: :order_greater, args: [a, b]}, bindings, _db, _barrier),
+    do: bool_goal(order_compare(a, b, bindings) == :gt, bindings)
+
+  defp dispatch(%Compound{name: :order_less_or_equal, args: [a, b]}, bindings, _db, _barrier),
+    do: bool_goal(order_compare(a, b, bindings) in [:lt, :eq], bindings)
+
+  defp dispatch(%Compound{name: :order_greater_or_equal, args: [a, b]}, bindings, _db, _barrier),
+    do: bool_goal(order_compare(a, b, bindings) in [:gt, :eq], bindings)
+
+  defp dispatch(%Compound{name: :compare, args: [order, a, b]}, bindings, _db, _barrier) do
+    unify_or_fail(bindings, order, order_atom(order_compare(a, b, bindings)))
+  end
+
   # -- type checks --
 
   defp dispatch(%Compound{name: :var, args: [x]}, bindings, _db, _barrier),
@@ -506,6 +524,14 @@ defmodule Episteme.Engine do
   defp structurally_equal?(a, b, bindings) do
     Term.structurally_equal?(Term.resolve_deep(a, bindings), Term.resolve_deep(b, bindings))
   end
+
+  defp order_compare(a, b, bindings) do
+    Term.compare_order(Term.resolve_deep(a, bindings), Term.resolve_deep(b, bindings))
+  end
+
+  defp order_atom(:lt), do: :<
+  defp order_atom(:eq), do: :=
+  defp order_atom(:gt), do: :>
 
   defp proper_list?(x, bindings) do
     case Bindings.resolve(Term, bindings, x) do

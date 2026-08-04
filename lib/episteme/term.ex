@@ -123,6 +123,84 @@ defmodule Episteme.Term do
 
   def structurally_equal?(a, b), do: a == b
 
+  @doc """
+  ISO's standard order of terms: `Var < Number < Atom < Compound`.
+  Both arguments should already be resolved (see `resolve_deep/2`) --
+  an unresolved variable bound to, say, a compound would otherwise
+  sort as a variable instead of by what it's actually bound to.
+
+  Within a class: variables order by reference identity (a total,
+  consistent order within one run, not meaningful across runs, and not
+  the same thing as *creation* order); numbers by value, with a float
+  sorting before an integer of equal value (`1.0` before `1`); atoms
+  alphabetically by character code (`[]`, the empty-list atom, sorts
+  as if its name were the two characters `[` `]`, same as any other
+  atom); compounds (a non-empty list decomposes via the same `'.'/2`
+  cons functor `compound?/1` uses everywhere else) by arity first, then
+  functor name alphabetically, then arguments left to right,
+  recursively.
+  """
+  @spec compare_order(term(), term()) :: :lt | :eq | :gt
+  def compare_order(a, b) do
+    {class_a, class_b} = {term_class(a), term_class(b)}
+
+    cond do
+      class_a < class_b -> :lt
+      class_a > class_b -> :gt
+      true -> compare_within_class(class_a, a, b)
+    end
+  end
+
+  defp term_class(%Var{}), do: 0
+  defp term_class(n) when is_number(n), do: 1
+  defp term_class([]), do: 2
+  defp term_class(a) when is_atom(a), do: 2
+  defp term_class(_compound_or_list), do: 3
+
+  defp compare_within_class(0, %Var{ref: a}, %Var{ref: b}), do: compare_native(a, b)
+  defp compare_within_class(1, a, b), do: compare_numbers(a, b)
+  defp compare_within_class(2, a, b), do: compare_native(atom_sort_key(a), atom_sort_key(b))
+
+  defp compare_within_class(3, a, b) do
+    {name_a, args_a} = deconstruct(a)
+    {name_b, args_b} = deconstruct(b)
+
+    with :eq <- compare_native(length(args_a), length(args_b)),
+         :eq <- compare_native(atom_sort_key(name_a), atom_sort_key(name_b)) do
+      compare_arg_lists(args_a, args_b)
+    end
+  end
+
+  defp compare_arg_lists([], []), do: :eq
+
+  defp compare_arg_lists([h1 | t1], [h2 | t2]) do
+    case compare_order(h1, h2) do
+      :eq -> compare_arg_lists(t1, t2)
+      other -> other
+    end
+  end
+
+  defp atom_sort_key([]), do: "[]"
+  defp atom_sort_key(a), do: Atom.to_string(a)
+
+  defp compare_numbers(a, b) do
+    cond do
+      a < b -> :lt
+      a > b -> :gt
+      is_float(a) and is_integer(b) -> :lt
+      is_integer(a) and is_float(b) -> :gt
+      true -> :eq
+    end
+  end
+
+  defp compare_native(a, b) do
+    cond do
+      a < b -> :lt
+      a > b -> :gt
+      true -> :eq
+    end
+  end
+
   @doc "True iff `term` contains no unbound variable anywhere -- resolve deeply first (see `resolve_deep/2`) if `term` may still hold bindings."
   @spec ground?(term()) :: boolean()
   def ground?(%Var{}), do: false

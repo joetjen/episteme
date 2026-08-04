@@ -118,6 +118,9 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 | `not_unify(A, B)` | Succeeds iff `A` and `B` do *not* unify (binds nothing). |
 | `equal(A, B)` | Structural equality on already-resolved terms (`equal(1, 1.0)` is false). |
 | `not_equal(A, B)` | Structural inequality. |
+| `order_less(A, B)`, `order_greater(A, B)` | Standard order of terms: `Var < Number < Atom < Compound` (real Prolog `@<`, `@>`). |
+| `order_less_or_equal(A, B)`, `order_greater_or_equal(A, B)` | Real Prolog `@=<`, `@>=`. |
+| `compare(Order, A, B)` | Unifies `Order` with `<`, `=`, or `>` per the standard order of terms. |
 | `copy_term(Term, Copy)` | Unifies `Copy` with `Term`, every still-unbound variable renamed apart (sharing preserved). |
 
 ## Type checks
