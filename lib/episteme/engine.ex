@@ -352,6 +352,15 @@ defmodule Episteme.Engine do
     prolog_throw(Exceptions.instantiation_error())
   end
 
+  defp dispatch(%Compound{name: :existence_error, args: [type, culprit]}, bindings, _db, _barrier) do
+    prolog_throw(
+      Exceptions.existence_error(
+        Bindings.resolve(Term, bindings, type),
+        Term.resolve_deep(culprit, bindings)
+      )
+    )
+  end
+
   # -- term inspection --
 
   defp dispatch(%Compound{name: :copy_term, args: [t, copy]}, bindings, _db, _barrier) do

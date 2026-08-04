@@ -185,6 +185,7 @@ Evaluable functors for `is/2` and the comparisons above:
 | `type_error(Type, Culprit)` | Throws `error(type_error(Type, Culprit), _)`. |
 | `domain_error(Domain, Culprit)` | Throws `error(domain_error(Domain, Culprit), _)`. |
 | `instantiation_error` | Throws `error(instantiation_error, _)`. |
+| `existence_error(Type, Culprit)` | Throws `error(existence_error(Type, Culprit), _)`. |
 
 Thrown automatically:
 - An unbound variable anywhere a goal or an arithmetic expression is

@@ -56,7 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Ichor.Backtrack.Bindings.unify_occurs_check/4`, already present in
   `ichor_runtime` but not previously wired up as a callable goal). See
   [REFERENCE.md](REFERENCE.md#ignore1) and
-  [REFERENCE.md](REFERENCE.md#unify_with_occurs_check2).
+  [REFERENCE.md](REFERENCE.md#unify_with_occurs_check2). Also
+  `existence_error/2`, exposed as a directly-callable goal alongside
+  `type_error/2`/`domain_error/2`/`instantiation_error/1` -- previously
+  only ever thrown internally (on an undefined-predicate call). This
+  closes out the full v0.2 predicate catalog.
 
 ## [0.1.0] - 2026-08-04
 

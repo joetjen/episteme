@@ -43,7 +43,8 @@ c = fn name, args -> %Compound{name: name, args: args} end
 - [Arithmetic](#arithmetic) — `is`, comparisons, `between`, every
   evaluable functor
 - [Exceptions](#exceptions) — `throw`, `catch`, `type_error`,
-  `domain_error`, `instantiation_error`, and what's raised automatically
+  `domain_error`, `instantiation_error`, `existence_error`, and what's
+  raised automatically
 - [Dynamic database](#dynamic-database) — `assert`, `asserta`,
   `assertz`, `retract`, `retractall`, `abolish`, `dynamic`, `clause`
 - [Lists](#lists) — `length`, `append`, `member`, `reverse`, `nth0`,
@@ -794,14 +795,14 @@ Episteme.query(c.(:safe_div, [10, 0, Term.new_var("R")]), db)
 #=> {:ok, [%{"R" => :undefined}]}
 ```
 
-### `type_error/2`, `domain_error/2`, `instantiation_error/1`
+### `type_error/2`, `domain_error/2`, `instantiation_error/1`, `existence_error/2`
 
 Called as goals, these always throw — they're the standard shapes for
 "wrong kind of value" / "right kind, wrong value" / "needed something
-bound, got a variable," available for your own rules to raise directly
-rather than reaching for a bare `throw/1`. Each wraps its formal error
-in `error(Formal, _)`, matching what every automatically-raised error
-below looks like too.
+bound, got a variable" / "no such procedure/entity," available for your
+own rules to raise directly rather than reaching for a bare `throw/1`.
+Each wraps its formal error in `error(Formal, _)`, matching what every
+automatically-raised error below looks like too.
 
 ```elixir
 Episteme.query(c.(:type_error, [:integer, :foo]), Database.new())
@@ -811,10 +812,13 @@ Episteme.query(c.(:type_error, [:integer, :foo]), Database.new())
 
 Episteme.query(c.(:domain_error, [:positive, -1]), Database.new())
 #=> {:error, error(domain_error(positive, -1), _)}
+
+Episteme.query(c.(:existence_error, [:procedure, c.(:/, [:foo, 2])]), Database.new())
+#=> {:error, error(existence_error(procedure, foo/2), _)}
 ```
 
 `instantiation_error/1` takes one argument for symmetry with the other
-two, but currently ignores it — it always throws the same
+three, but currently ignores it — it always throws the same
 `error(instantiation_error, _)` regardless of what you pass:
 
 ```elixir
