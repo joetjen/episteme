@@ -60,6 +60,7 @@ same vocabulary, defined there at more length.
 | atom `foo` | `:foo` |
 | integer `42` | `42` |
 | float `3.14` | `3.14` |
+| string `"foo"` | `"foo"` (a native Elixir binary -- a distinct type from atoms) |
 | variable `X` | `Term.new_var("X")` (anonymous: `Term.new_var()`, name defaults to `"_"`) |
 | compound `foo(A, B)` | `%Compound{name: :foo, args: [a, b]}` |
 | list `[1, 2, 3]` | `[1, 2, 3]` (a native Elixir list) |
@@ -106,8 +107,11 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 | `if_then(Cond, Then)` | Like `if_then_else/3` with no `Else` — fails outright if `Cond` fails. |
 | `not(G)` | Negation as failure: succeeds iff `G` has no solutions. Binds nothing. |
 | `once(G)` | Commits to `G`'s first solution. |
+| `ignore(G)` | Like `once/1`, but never fails -- succeeds unchanged if `G` has no solution. |
 | `call(G, Extra...)` | Calls `G` with `Extra` args appended; cut-opaque. |
 | `findall(Template, G, List)` | Collects `Template` for every solution of `G` into `List` (`[]` if none). Cut-opaque, binds nothing else. |
+| `bagof(Template, G, List)` | Like `findall/3`, but fails (not `List = []`) on no solutions, and groups by `G`'s free variables (not in `Template`, not `Var^G`-quantified), backtracking one group per binding. |
+| `setof(Template, G, List)` | Like `bagof/3`, but each group's `List` is sorted + deduped by standard order, and groups are ordered by witness. |
 | `forall(Cond, Action)` | Succeeds iff every solution of `Cond` has a solution of `Action`. Cut-opaque, binds nothing. |
 
 ## Matching and comparing values (unification)
@@ -116,8 +120,12 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 |---|---|
 | `unify(A, B)` | Unify. |
 | `not_unify(A, B)` | Succeeds iff `A` and `B` do *not* unify (binds nothing). |
+| `unify_with_occurs_check(A, B)` | Like `unify/2`, but fails instead of building a self-referential/infinite term. |
 | `equal(A, B)` | Structural equality on already-resolved terms (`equal(1, 1.0)` is false). |
 | `not_equal(A, B)` | Structural inequality. |
+| `order_less(A, B)`, `order_greater(A, B)` | Standard order of terms: `Var < Number < Atom < Compound` (real Prolog `@<`, `@>`). |
+| `order_less_or_equal(A, B)`, `order_greater_or_equal(A, B)` | Real Prolog `@=<`, `@>=`. |
+| `compare(Order, A, B)` | Unifies `Order` with `<`, `=`, or `>` per the standard order of terms. |
 | `copy_term(Term, Copy)` | Unifies `Copy` with `Term`, every still-unbound variable renamed apart (sharing preserved). |
 
 ## Type checks
@@ -127,13 +135,23 @@ A `solution` is `%{"VarName" => resolved_term}` for every *named*
 | `var(X)` | An unbound variable. |
 | `nonvar(X)` | Anything else. |
 | `atom(X)` | A plain atom. |
-| `atomic(X)` | An atom or number (not a variable, compound, or list). |
+| `string(X)` | A real string -- never true for an atom with the same characters. |
+| `atomic(X)` | An atom, number, or string (not a variable, compound, or list). |
 | `number(X)` | An integer or float. |
 | `integer(X)` | An integer. |
 | `float(X)` | A float. |
 | `compound(X)` | A `%Compound{}` or a non-empty list. |
 | `callable(X)` | An atom, `%Compound{}`, or non-empty list. |
 | `is_list(X)` | A proper (nil-terminated) list. |
+| `ground(X)` | No unbound variable anywhere in `X`, at any depth. |
+
+## Term construction and inspection
+
+| Goal | Meaning |
+|---|---|
+| `functor(Term, Name, Arity)` | `Term` bound: decomposes it. `Term` unbound: builds it from `Name`/`Arity` (`Arity` 0 unifies `Term` with `Name`; `Arity` > 0 needs an atom `Name`, builds fresh-variable args). |
+| `arg(N, Term, Arg)` | `Arg` is `Term`'s `N`th argument, 1-based. Out of range fails, not an error. |
+| `univ(Term, List)` | Real Prolog `=..`. `Term` bound: `List` = `[Name \| Args]` (or `[Term]` if atomic). `Term` unbound: builds `Term` from a fully-instantiated `List`. |
 
 ## Arithmetic
 
@@ -160,6 +178,9 @@ Evaluable functors for `is/2` and the comparisons above:
 | `sign(X)` | `1`, `-1`, or `0`. |
 | `min(A, B)`, `max(A, B)` | The usual. |
 | `sqrt(X)` | Always a float. |
+| `sin(X)`, `cos(X)`, `tan(X)` | Trig, radians. |
+| `exp(X)` | `e^X`. |
+| `log(X)` | Natural log (base `e`). |
 | unary `-X`, `+X` | Negation / identity. |
 
 ## Exceptions
@@ -171,6 +192,7 @@ Evaluable functors for `is/2` and the comparisons above:
 | `type_error(Type, Culprit)` | Throws `error(type_error(Type, Culprit), _)`. |
 | `domain_error(Domain, Culprit)` | Throws `error(domain_error(Domain, Culprit), _)`. |
 | `instantiation_error` | Throws `error(instantiation_error, _)`. |
+| `existence_error(Type, Culprit)` | Throws `error(existence_error(Type, Culprit), _)`. |
 
 Thrown automatically:
 - An unbound variable anywhere a goal or an arithmetic expression is
@@ -190,6 +212,9 @@ rather than escaping as a raw Elixir exception.
 | `asserta(Clause)` | Same, but prepends. |
 | `retract(Clause)` | Removes the *first* stored clause whose head and body both unify with `Clause`; keeps the resulting bindings. Fails (no mutation) if nothing unifies. Deterministic on success — does not backtrack into further matches. |
 | `retractall(Head)` | Removes every clause whose head unifies with `Head`. Always succeeds, binds nothing, and — like real Prolog — leaves the predicate *defined* (with zero clauses) rather than undefined, so later calls fail rather than raising `existence_error`. |
+| `abolish(Name/Arity)` | Unlike `retractall/1`, undefines the predicate too -- a later call raises `existence_error` again. |
+| `dynamic(Name/Arity)` (or `dynamic([Ind, ...])`) | Declares defined with zero clauses, so a call fails instead of raising `existence_error`. No-op if it already has clauses. |
+| `clause(Head, Body)` | Enumerates every stored clause for `Head`'s `{name, arity}` whose head unifies with `Head`, one per backtrack (`Body = true` for a fact). `Head` must be bound. Undefined predicate just fails. |
 
 Effects are visible immediately to every later call against the same
 `Database.t()`, including from separate `Episteme.query/2` calls, and are
@@ -206,6 +231,49 @@ Effects are visible immediately to every later call against the same
 | `nth0(Index, List, Elem)` | 0-based. `Index` unbound enumerates every `{index, element}` pair. |
 | `nth1(Index, List, Elem)` | 1-based, same modes as `nth0/3`. |
 | `last(List, Elem)` | Fails on `[]`. |
+| `msort(List, Sorted)` | Sorts by standard order of terms, keeps duplicates. |
+| `sort(List, Sorted)` | Sorts and removes duplicates (`compare/3 == =`, not plain `==`). |
+| `permutation(List, Perm)` | Enumerates every reordering, `N!` of them. `List` must be bound. |
+| `sum_list(List, Sum)` | `Sum = 0` for `[]`. |
+| `max_list(List, Max)`, `min_list(List, Min)` | Fail on `[]`. |
+| `list_to_set(List, Set)` | Dedups, keeps first-occurrence order (unsorted). |
+
+## Higher-order list predicates
+
+`Goal` is called via the same mechanism as `call/N`, once per element
+(or per row, across lists in lockstep), cut-opaque.
+
+| Goal | Meaning |
+|---|---|
+| `include(Goal, List, Kept)` | Elements where `call(Goal, Elem)` succeeds. |
+| `exclude(Goal, List, Kept)` | Elements where it doesn't. |
+| `foldl(Goal, List, V0, V)` (also `/5`, `/6` for 2–3 lists) | Threads an accumulator: `call(Goal, Elem, AccIn, AccOut)` per element. |
+| `maplist(Goal, List1, ..., ListN)` | Succeeds iff `call(Goal, E1_i, ..., EN_i)` succeeds for every row. At least one list must be bound; others get built fresh. |
+
+## Atom, number, and string conversions
+
+`atom_*`/`number_*` work with atoms (and `atom_chars/2` produces
+single-character *atoms*); `string_*`/`split_string` work with real
+strings instead (and `string_chars/2` produces single-character
+*strings*) -- the two families are not interchangeable.
+
+| Goal | Meaning |
+|---|---|
+| `atom_codes(A, Codes)`, `atom_chars(A, Chars)` | Atom <-> code list / single-char-atom list, either direction. |
+| `atom_length(Atomic, Len)` | Character count of any atomic term's text. |
+| `atom_concat(A1, A2, A3)` | `A1`+`A2` bound: concatenates. `A3` only: enumerates every split on backtracking. |
+| `sub_atom(Atom, Before, Len, After, Sub)` | Relates `Atom` to every substring; unbound args enumerate, bound ones narrow. `Sub` is always an atom. |
+| `char_code(Char, Code)` | Single-character atom <-> its code, either direction. |
+| `number_codes(N, Codes)`, `number_chars(N, Chars)` | Number <-> code list / single-char-atom list, either direction; unparseable text raises `type_error(number, _)`. |
+| `upcase_atom(A, U)`, `downcase_atom(A, D)` | Case conversion. |
+| `atomic_list_concat(List, A)` | Concatenates a bound list of atomics (no splitting mode). |
+| `atomic_list_concat(List, Sep, A)` | List bound: joins with `Sep`. List unbound, `A` bound: splits `A` on `Sep` (deterministic, unlike `atom_concat/3`'s enumeration). |
+| `atom_string(A, S)`, `string_to_atom(S, A)` | Atom <-> string, either direction (same conversion, argument order swapped). |
+| `string_concat(S1, S2, S3)` | Same shape as `atom_concat/3`, but string results. |
+| `string_chars(S, Chars)`, `string_codes(S, Codes)` | Same shape as the `atom_*` versions, but string/code results (`string_chars/2`'s chars are strings, not atoms). |
+| `string_length(S, Len)` | Character count. |
+| `number_string(N, S)` | Like `atom_string/2`, for numbers. |
+| `split_string(S, SepChars, PadChars, SubStrings)` | Splits `S` on any char in `SepChars` (`""` = don't split), then trims `PadChars` from each field's ends. Always strings. |
 
 ## I/O
 
@@ -215,9 +283,32 @@ Effects are visible immediately to every later call against the same
 | `writeln(Term)` | Same, with a trailing newline. |
 | `print(Term)` | Same as `write/1`. |
 | `nl` | Prints a newline. |
+| `format(Format, Args)` (also `/1`, `Args = []`) | Prints `Format` with each `~`-directive consuming the next element of `Args`. A non-list `Args` is treated as `[Args]`. |
 
 No operator-aware pretty-printing (e.g. `1+2` prints as `+(1, 2)`) — a
 front-end reader is where that would live.
+
+`format/2` directives: `~w`/`~p`/`~q` (term text, all the same here),
+`~a` (atom text), `~d` (integer text), `~s` (code-list/string text),
+`~i` (skip an argument), `~n` (newline), `~~` (literal `~`). No
+column/radix directives (`~t`, `~|`, `~Nr`, numeric-prefixed `~Nd`).
+
+## DCG (Definite Clause Grammars)
+
+`Head --> Body` threads an incoming/outgoing difference-list pair
+(`S0`/`S`) through every nonterminal call. `Episteme.Dcg` does the
+translation; practical subset only -- terminals (`[t1,...,tn]`),
+`{Goal}` (embedded plain goal, no list threading), `cut`, `and`, `or`,
+`if_then`, `if_then_else`, `not`, a bare nonterminal (atom/compound),
+a variable body (`phrase(Var, S0, S)`). No `call//N` pushback.
+
+| Goal / form | Meaning |
+|---|---|
+| `phrase(Body, List)` | Translates `Body`, calls it with `List` as input and `[]` as output (must consume all of `List`). Cut-opaque. |
+| `phrase(Body, List, Rest)` | Same, but leaves whatever's unconsumed in `Rest`. |
+| `dcg_translate(Rule, Clause)` | Unifies `Clause` with the ordinary clause `Rule` (a `Head --> Body` term) translates to -- no storage. |
+| `{:dcg, head, body}` (`Database.consult_forms/2`) | Translates and stores, like `{:rule, head, body}` but for a DCG rule. |
+| `assert((Head --> Body))` | Same translation, applied to a `-->/2`-shaped clause term (same as `:-/2` is already special-cased). |
 
 ## `Episteme.Term` (Elixir side)
 

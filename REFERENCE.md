@@ -28,21 +28,39 @@ c = fn name, args -> %Compound{name: name, args: args} end
 ## Contents
 
 - [Control constructs](#control-constructs) — `true`, `fail`/`false`,
-  `cut`, `and`, `or`, `if_then`/`if_then_else`, `not`, `once`, `call`,
-  `findall`, `forall`
+  `cut`, `and`, `or`, `if_then`/`if_then_else`, `not`, `once`, `ignore`,
+  `call`, `findall`, `bagof`, `setof`, `forall`
 - [Matching and comparing values](#matching-and-comparing-values) —
-  `unify`, `not_unify`, `equal`, `not_equal`, `copy_term`
-- [Type checks](#type-checks) — `var`, `nonvar`, `atom`, `atomic`,
-  `number`, `integer`, `float`, `compound`, `callable`, `is_list`
+  `unify`, `not_unify`, `unify_with_occurs_check`, `equal`, `not_equal`,
+  standard order of terms (`order_less`, `order_greater`,
+  `order_less_or_equal`, `order_greater_or_equal`, `compare`),
+  `copy_term`
+- [Type checks](#type-checks) — `var`, `nonvar`, `atom`, `string`,
+  `atomic`, `number`, `integer`, `float`, `compound`, `callable`,
+  `is_list`, `ground`
+- [Term construction and inspection](#term-construction-and-inspection)
+  — `functor`, `arg`, `univ`
 - [Arithmetic](#arithmetic) — `is`, comparisons, `between`, every
   evaluable functor
 - [Exceptions](#exceptions) — `throw`, `catch`, `type_error`,
-  `domain_error`, `instantiation_error`, and what's raised automatically
+  `domain_error`, `instantiation_error`, `existence_error`, and what's
+  raised automatically
 - [Dynamic database](#dynamic-database) — `assert`, `asserta`,
-  `assertz`, `retract`, `retractall`
+  `assertz`, `retract`, `retractall`, `abolish`, `dynamic`, `clause`
 - [Lists](#lists) — `length`, `append`, `member`, `reverse`, `nth0`,
-  `nth1`, `last`
-- [I/O](#io) — `write`, `writeln`, `print`, `nl`
+  `nth1`, `last`, `msort`, `sort`, `permutation`, `sum_list`,
+  `max_list`, `min_list`, `list_to_set`
+- [Higher-order list predicates](#higher-order-list-predicates) —
+  `include`, `exclude`, `foldl`, `maplist`
+- [Atom, number, and string conversions](#atom-number-and-string-conversions)
+  — `atom_codes`, `atom_chars`, `atom_length`, `atom_concat`,
+  `sub_atom`, `char_code`, `number_codes`, `number_chars`,
+  `upcase_atom`, `downcase_atom`, `atomic_list_concat`, `atom_string`,
+  `string_to_atom`, `string_concat`, `string_chars`, `string_codes`,
+  `string_length`, `number_string`, `split_string`
+- [I/O](#io) — `write`, `writeln`, `print`, `nl`, `format`
+- [DCG (Definite Clause Grammars)](#dcg-definite-clause-grammars) —
+  `phrase`, `dcg_translate`, asserting a DCG rule dynamically
 
 A note before diving in: every goal name below is a plain English word
 (`and`, `or`, `unify`, ...), not real Prolog's punctuation operator
@@ -234,6 +252,22 @@ Contrast with a plain `member(X, [1,2,3])`, which would give three
 answers (`X = 1`, `X = 2`, `X = 3`) — `once/1` throws the other two away
 before you ever see them.
 
+### `ignore/1`
+
+Like `once/1` -- commits to `Goal`'s first solution -- but never fails:
+if `Goal` has no solution, `ignore/1` still succeeds, with the bindings
+left exactly as they were beforehand. Cut-opaque, same as `once/1`.
+Equivalent to `(call(Goal) -> true ; true)`.
+
+```elixir
+Episteme.query(c.(:ignore, [:fail]), Database.new())
+#=> {:ok, [%{}]}
+```
+
+Useful for a side-effecting goal (asserting a fact, printing something)
+you want to attempt without aborting the rest of a conjunction if it
+happens to fail.
+
 ### `call/N`
 
 `call(Goal, Extra1, Extra2, ...)` runs `Goal` with the extra arguments
@@ -282,6 +316,56 @@ Episteme.query(c.(:findall, [fx, c.(:fruit, [fx]), Term.new_var("L")]), db)
 `findall/3`'s own template/goal; see [TUTORIAL.md §11](TUTORIAL.md#11-collecting-every-solution-findall-and-forall)
 for why a *named* variable used only there would come back in the
 answer too, still unfilled.)
+
+### `bagof/3` and `setof/3`
+
+Like `findall/3`, but two differences. First: zero solutions makes
+`bagof/3`/`setof/3` *fail outright*, not succeed with `List = []` --
+useful when "nothing matched" should be a failure your caller can
+branch on (`\+`, `;`, ...), not a value it has to inspect. Second: they
+group solutions by `Goal`'s own *free variables* -- every variable
+`Goal` mentions that `Template` doesn't, and that isn't existentially
+quantified away with `Var^Goal` -- backtracking through one solution
+per distinct combination of free-variable values, each one binding
+those free variables *and* `List` to that group's own results.
+
+```elixir
+db =
+  Database.new()
+  |> Database.add_fact(c.(:likes, [:mary, :apples]))
+  |> Database.add_fact(c.(:likes, [:mary, :pears]))
+  |> Database.add_fact(c.(:likes, [:john, :apples]))
+
+person = Term.new_var("Person")
+thing = Term.new_var()
+
+Episteme.query(c.(:bagof, [thing, c.(:likes, [person, thing]), Term.new_var("L")]), db)
+#=> {:ok, [%{"Person" => :mary, "L" => [:apples, :pears]}, %{"Person" => :john, "L" => [:apples]}]}
+```
+
+`Person` was never mentioned in `Template` (`thing`), so it becomes a
+grouping variable instead of ending up inside `List`. Wrap it in
+`Person^Goal` to fold every solution into one bag regardless of who
+likes what:
+
+```elixir
+person = Term.new_var()
+thing = Term.new_var()
+goal = c.(:^, [person, c.(:likes, [person, thing])])
+
+Episteme.query(c.(:bagof, [thing, goal, Term.new_var("L")]), db)
+#=> {:ok, [%{"L" => [:apples, :pears, :apples]}]}
+```
+
+`setof/3` is `bagof/3` plus `Term.sort_unique/1` applied to each
+group's own list (dropping duplicates, sorting by standard order of
+terms), and it also orders the groups themselves by their witness
+value -- `bagof/3` leaves both in first-solution order.
+
+```elixir
+Episteme.query(c.(:setof, [thing, goal, Term.new_var("L")]), db)
+#=> {:ok, [%{"L" => [:apples, :pears]}]}
+```
 
 ### `forall/2`
 
@@ -334,6 +418,23 @@ Episteme.query(c.(:not_unify, [1, 1]), Database.new())
 #=> {:ok, []}
 ```
 
+### `unify_with_occurs_check/2`
+
+Like `unify/2`, but with an occurs-check: a variable is never allowed to
+bind to a compound term that already contains it, which `unify/2` would
+otherwise accept, silently building an infinite term (`X = f(X)`). ISO
+Prolog's `=/2` has no occurs-check by default -- this is the explicit,
+opt-in safe variant.
+
+```elixir
+x = Term.new_var("X")
+Episteme.query(c.(:unify_with_occurs_check, [x, c.(:f, [x])]), Database.new())
+#=> {:ok, []}
+
+Episteme.query(c.(:unify_with_occurs_check, [Term.new_var("X"), c.(:foo, [1, 2])]), Database.new())
+#=> {:ok, [%{"X" => %Episteme.Term.Compound{name: :foo, args: [1, 2]}}]}
+```
+
 ### `equal/2` — structural equality (real Prolog: `==`)
 
 `equal(A, B)` checks whether two *already-resolved* terms have exactly
@@ -358,6 +459,35 @@ The opposite of `equal/2` — succeeds exactly when `equal/2` would fail.
 ```elixir
 Episteme.query(c.(:not_equal, [1, 1.0]), Database.new())
 #=> {:ok, [%{}]}
+```
+
+### Standard order of terms: `order_less/2`, `order_greater/2`, `order_less_or_equal/2`, `order_greater_or_equal/2` (real Prolog: `@<`, `@>`, `@=<`, `@>=`), and `compare/3`
+
+A total order over *every* term, not just numbers — `Var < Number <
+Atom < Compound`. Within a class: variables order by reference identity
+(consistent within one run, arbitrary across runs); numbers by value,
+with a float sorting before an integer of equal value (so `1.0` and
+`1`, unlike `equal/2`'s `==`, are never `order`-equal either — they
+just consistently sort float-before-int instead); atoms alphabetically
+by character code; compounds (a non-empty list decomposes via the same
+`.`/2 cons functor used everywhere else) by arity first, then
+functor name, then arguments left to right. `compare/3` is the one
+member of this family whose own name isn't ISO punctuation, so it
+keeps its ISO name unchanged: `compare(Order, A, B)` unifies `Order`
+with the atom `<`, `=`, or `>`.
+
+```elixir
+Episteme.query(c.(:order_less, [1.0, 1]), Database.new())
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:compare, [Term.new_var("O"), :a, :b]), Database.new())
+#=> {:ok, [%{"O" => :<}]}
+
+Episteme.query(
+  c.(:compare, [Term.new_var("O"), c.(:f, [1]), c.(:f, [1, 2])]),
+  Database.new()
+)
+#=> {:ok, [%{"O" => :<}]}   -- arity 1 sorts before arity 2, regardless of args
 ```
 
 ### `copy_term/2`
@@ -419,13 +549,31 @@ Episteme.query(c.(:atom, [1]), Database.new())
 #=> {:ok, []}
 ```
 
+### `string/1`
+
+True for a real string (see [Atom, number, and string conversions](#atom-number-and-string-conversions)
+below) — false for an atom with the same characters, or anything else. A string is never `atom/1`,
+and an atom is never `string/1`, no matter how they print.
+
+```elixir
+Episteme.query(c.(:string, ["foo"]), Database.new())
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:string, [:foo]), Database.new())
+#=> {:ok, []}
+```
+
 ### `atomic/1`
 
-True for an atom *or* a number — anything with no internal structure to
-speak of. False for compounds, non-empty lists, and unbound variables.
+True for an atom, a number, *or* a string — anything with no internal
+structure to speak of. False for compounds, non-empty lists, and
+unbound variables.
 
 ```elixir
 Episteme.query(c.(:atomic, [1]), Database.new())
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:atomic, ["foo"]), Database.new())
 #=> {:ok, [%{}]}
 
 Episteme.query(c.(:atomic, [c.(:foo, [1])]), Database.new())
@@ -495,6 +643,97 @@ Episteme.query(c.(:is_list, [[1, 2, 3]]), Database.new())
 Episteme.query(c.(:is_list, [:foo]), Database.new())
 #=> {:ok, []}
 ```
+
+---
+
+### `ground/1`
+
+True iff `Term` contains no unbound variable anywhere, at any depth —
+resolves deeply first, so a variable that's already bound to a ground
+term counts as ground too.
+
+```elixir
+Episteme.query(c.(:ground, [c.(:f, [1, [2, 3]])]), Database.new())
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:ground, [c.(:f, [1, Term.new_var("X")])]), Database.new())
+#=> {:ok, []}
+```
+
+---
+
+## Term construction and inspection
+
+### `functor/3`
+
+`functor(Term, Name, Arity)` relates a term to its outermost
+name/arity, and works in both directions:
+
+- **`Term` bound** — decomposes it. A compound gives its own name and
+  argument count; an atomic term (atom or number) gives itself as
+  `Name` with `Arity` 0. A non-empty list decomposes via the same
+  `.`/2 cons functor `Term.compound?/1` uses everywhere else (`Name`
+  = `.`, `Arity` = 2); `[]` is atomic, same as any other atom.
+- **`Term` unbound** — builds a fresh term from `Name`/`Arity` instead.
+  `Arity` 0 just unifies `Term` with `Name` as-is (whatever atomic
+  value it is); `Arity` > 0 requires `Name` to be an atom and builds a
+  compound of that many brand-new, independent variables.
+
+```elixir
+Episteme.query(
+  c.(:functor, [c.(:foo, [:a, :b, :c]), Term.new_var("F"), Term.new_var("A")]),
+  Database.new()
+)
+#=> {:ok, [%{"A" => 3, "F" => :foo}]}
+
+Episteme.query(c.(:functor, [Term.new_var("T"), :foo, 2]), Database.new())
+#=> one answer: "T" is a fresh foo(A, B), A and B independent fresh variables
+```
+
+A non-atom `Name` with `Arity` > 0 raises `type_error(atom, Name)`; an
+unbound `Term` with an unbound `Name` or `Arity` raises
+`instantiation_error`.
+
+### `arg/3`
+
+`arg(N, Term, Arg)` — `Arg` is `Term`'s `N`th argument, 1-based.
+`Term` must already be bound and compound (`type_error(compound,
+Term)` otherwise); `N` must be bound to an integer (`type_error(integer,
+N)` otherwise). `N` out of range (less than 1, or more than `Term`'s
+arity) just fails, the same as `nth0/3`/`nth1/3` do for an
+out-of-range index — not an error.
+
+```elixir
+Episteme.query(c.(:arg, [2, c.(:foo, [:a, :b, :c]), Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :b}]}
+```
+
+### `univ/2` (real Prolog: `=..`)
+
+`univ(Term, List)` relates a term to a list of its name followed by
+its arguments — the same decompose/construct duality as `functor/3`,
+just carrying the whole argument list at once instead of counting it.
+
+- **`Term` bound** — `List` unifies with `[Name | Args]` for a
+  compound, or the singleton `[Term]` for an atomic term.
+- **`Term` unbound** — `List` must already be a fully-instantiated,
+  non-empty list. A singleton `[Name]` just unifies `Term` with `Name`
+  as-is; `[Name | Args]` with a non-empty `Args` requires `Name` to be
+  an atom and builds a compound (`Term.reconstruct/2` special-cases
+  `Name` = `.` with exactly two `Args` into a native list here too,
+  same as `functor/3`'s construct mode).
+
+```elixir
+Episteme.query(c.(:univ, [c.(:foo, [:a, :b]), Term.new_var("L")]), Database.new())
+#=> {:ok, [%{"L" => [:foo, :a, :b]}]}
+
+Episteme.query(c.(:univ, [Term.new_var("T"), [:foo, :a, :b]]), Database.new())
+#=> {:ok, [%{"T" => %Episteme.Term.Compound{name: :foo, args: [:a, :b]}}]}
+```
+
+A non-atom head in a multi-element `List` raises `type_error(atom,
+Head)`; an empty `List` raises `domain_error(non_empty_list, [])`; an
+unbound `Term` with an unbound `List` raises `instantiation_error`.
 
 ---
 
@@ -581,6 +820,11 @@ either side of the comparisons above. `X` below stands for whatever
 | `min(3, 7)` | `3` | |
 | `max(3, 7)` | `7` | |
 | `sqrt(16)` | `4.0` | Always a float, even for a perfect square. |
+| `sin(0)` | `0.0` | Radians, like every trig functor here. |
+| `cos(0)` | `1.0` | |
+| `tan(0)` | `0.0` | |
+| `exp(0)` | `1.0` | `e^X`. |
+| `log(1)` | `0.0` | Natural log (base `e`). |
 | `-5` (unary) | `-5` | Negation. |
 | `+5` (unary) | `5` | Identity. |
 
@@ -632,14 +876,14 @@ Episteme.query(c.(:safe_div, [10, 0, Term.new_var("R")]), db)
 #=> {:ok, [%{"R" => :undefined}]}
 ```
 
-### `type_error/2`, `domain_error/2`, `instantiation_error/1`
+### `type_error/2`, `domain_error/2`, `instantiation_error/1`, `existence_error/2`
 
 Called as goals, these always throw — they're the standard shapes for
 "wrong kind of value" / "right kind, wrong value" / "needed something
-bound, got a variable," available for your own rules to raise directly
-rather than reaching for a bare `throw/1`. Each wraps its formal error
-in `error(Formal, _)`, matching what every automatically-raised error
-below looks like too.
+bound, got a variable" / "no such procedure/entity," available for your
+own rules to raise directly rather than reaching for a bare `throw/1`.
+Each wraps its formal error in `error(Formal, _)`, matching what every
+automatically-raised error below looks like too.
 
 ```elixir
 Episteme.query(c.(:type_error, [:integer, :foo]), Database.new())
@@ -649,10 +893,13 @@ Episteme.query(c.(:type_error, [:integer, :foo]), Database.new())
 
 Episteme.query(c.(:domain_error, [:positive, -1]), Database.new())
 #=> {:error, error(domain_error(positive, -1), _)}
+
+Episteme.query(c.(:existence_error, [:procedure, c.(:/, [:foo, 2])]), Database.new())
+#=> {:error, error(existence_error(procedure, foo/2), _)}
 ```
 
 `instantiation_error/1` takes one argument for symmetry with the other
-two, but currently ignores it — it always throws the same
+three, but currently ignores it — it always throws the same
 `error(instantiation_error, _)` regardless of what you pass:
 
 ```elixir
@@ -768,6 +1015,59 @@ Episteme.query(c.(:s, [Term.new_var("X")]), db)
 #=> {:ok, []}
 ```
 
+### `abolish/1`
+
+`abolish(Name/Arity)` removes every stored clause *and* the predicate's
+defined status — unlike `retractall/1`, a call afterward raises
+`existence_error` again, exactly as if it had never been asserted.
+
+```elixir
+db = Database.new() |> Database.add_fact(c.(:p, [1]))
+Episteme.query(c.(:abolish, [c.(:/, [:p, 1])]), db)
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:p, [1]), db)
+#=> {:error, error(existence_error(procedure, p/1), _)}
+```
+
+### `dynamic/1`
+
+`dynamic(Name/Arity)` (or `dynamic([Name/Arity, ...])` for several at
+once) declares a predicate defined with zero clauses, so a call fails
+instead of raising `existence_error`, and `assert`/`retract` can be
+used on it right away — without this, asserting to a brand-new
+predicate already works (asserting *is* defining it), but calling one
+that has never been asserted to yet does not. A no-op if the predicate
+already has clauses; existing ones are never touched.
+
+```elixir
+db = Database.new()
+Episteme.query(c.(:dynamic, [c.(:/, [:counter, 1])]), db)
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:counter, [Term.new_var("X")]), db)
+#=> {:ok, []}   -- fails, doesn't raise existence_error
+```
+
+### `clause/2`
+
+`clause(Head, Body)` enumerates every stored clause for `Head`'s own
+`{name, arity}` whose (freshly renamed) head unifies with `Head`, one
+per backtrack, unifying `Body` with that clause's own (freshly
+renamed) body — a fact's body is `true`. `Head` must already be bound
+enough to know its functor/arity; calling on an undefined predicate
+just fails, it doesn't raise `existence_error`.
+
+```elixir
+db =
+  Database.new()
+  |> Database.add_fact(c.(:p, [1]))
+  |> Database.add_fact(c.(:p, [3]))
+
+Episteme.query(c.(:clause, [c.(:p, [Term.new_var("X")]), Term.new_var("Body")]), db)
+#=> {:ok, [%{"Body" => true, "X" => 1}, %{"Body" => true, "X" => 3}]}
+```
+
 ---
 
 ## Lists
@@ -859,6 +1159,324 @@ Episteme.query(c.(:last, [[], Term.new_var("X")]), Database.new())
 #=> {:ok, []}
 ```
 
+### `msort/2` and `sort/2`
+
+Both sort by the [standard order of terms](#matching-and-comparing-values),
+not just numeric order — `msort/2` keeps duplicates, `sort/2` also
+removes any term that standard-order-compares equal to its neighbor
+once sorted (not plain `==` — `1` and `1.0` are equal in *value* but
+never merged, since they're never `:eq` in standard order either; see
+`compare/3`'s own note on this).
+
+```elixir
+Episteme.query(c.(:msort, [[3, 1, 2, 1], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [1, 1, 2, 3]}]}
+
+Episteme.query(c.(:sort, [[3, 1, 2, 1], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [1, 2, 3]}]}
+```
+
+### `permutation/2`
+
+`permutation(List, Perm)` enumerates every reordering of `List`, one
+per backtrack (`N!` of them for a list of length `N` — inherently
+expensive for anything but a small list, the same as in any Prolog).
+`List` must already be bound.
+
+```elixir
+Episteme.query(c.(:permutation, [[1, 2], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [1, 2]}, %{"X" => [2, 1]}]}
+```
+
+### `sum_list/2`, `max_list/2`, `min_list/2`
+
+Fold a list of numbers down to their sum, maximum, or minimum.
+`sum_list([], Sum)` gives `Sum = 0` (the identity); `max_list/2` and
+`min_list/2` both fail on an empty list instead — there's no
+extremum to report.
+
+```elixir
+Episteme.query(c.(:sum_list, [[1, 2, 3], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => 6}]}
+
+Episteme.query(c.(:max_list, [[3, 1, 2], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => 3}]}
+```
+
+### `list_to_set/2`
+
+Removes duplicates (by standard order, same as `sort/2`), but keeps
+first-occurrence order instead of sorting.
+
+```elixir
+Episteme.query(c.(:list_to_set, [[3, 1, 3, 2, 1], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [3, 1, 2]}]}
+```
+
+---
+
+## Higher-order list predicates
+
+`include/3`, `exclude/3`, `foldl/4+`, and `maplist/2+` all take a
+`Goal` as their first argument and call it — via the same mechanism
+`call/N` uses — once per list element (or once per matching row,
+across several lists in lockstep), each call cut-opaque, exactly like
+`call/N` itself.
+
+### `include/3` and `exclude/3`
+
+`include(Goal, List, Included)` keeps every element for which
+`call(Goal, Elem)` succeeds at least once; `exclude/3` keeps the
+elements where it *doesn't*. Neither propagates any bindings `Goal`
+makes back into the result — they're pure membership tests, run once
+per element, first-solution-only.
+
+```elixir
+x = Term.new_var("X")
+positive_db =
+  Database.new() |> Database.consult_forms([{:rule, c.(:positive, [x]), c.(:>, [x, 0])}])
+
+Episteme.query(c.(:include, [:positive, [1, -2, 3, -4], Term.new_var("L")]), positive_db)
+#=> {:ok, [%{"L" => [1, 3]}]}
+```
+
+### `foldl/4`, `foldl/5`, `foldl/6` (1–3 lists)
+
+`foldl(Goal, List, V0, V)` threads an accumulator through `Goal`,
+called as `call(Goal, Elem, AccIn, AccOut)` for each element in turn —
+`V0` seeds the first call's `AccIn`, `V` unifies with the last call's
+`AccOut` (or with `V0` directly, for an empty list). `foldl/5`/`foldl/6`
+walk two or three lists in lockstep instead of one, all of which must
+already be bound to the same length.
+
+```elixir
+x = Term.new_var("X")
+a0 = Term.new_var("A0")
+a = Term.new_var("A")
+add_db =
+  Database.new() |> Database.consult_forms([{:rule, c.(:add, [x, a0, a]), c.(:is, [a, c.(:+, [a0, x])])}])
+
+Episteme.query(c.(:foldl, [:add, [1, 2, 3, 4], 0, Term.new_var("Sum")]), add_db)
+#=> {:ok, [%{"Sum" => 10}]}
+```
+
+### `maplist/2` through `maplist/N`
+
+`maplist(Goal, List1, ..., ListN)` succeeds iff `call(Goal, E1_i, ...,
+EN_i)` succeeds for every row `i` across the `N` lists in lockstep. At
+least one list must already be bound (fixing the row count); any other
+list left unbound is unified with a fresh list of that many
+independent variables first, so a call-mode `Goal` can fill it in.
+
+```elixir
+Episteme.query(c.(:maplist, [:positive, [1, 2, 3]]), positive_db)
+#=> {:ok, [%{}]}   -- every element is positive
+
+Episteme.query(c.(:maplist, [:positive, [1, -2, 3]]), positive_db)
+#=> {:ok, []}   -- -2 isn't
+```
+
+---
+
+## Atom, number, and string conversions
+
+Two families, sharing one underlying idea: every predicate here reads
+or produces the *text* of an atomic term (atom, number, or a real
+string — see [`string/1`](#string1) above). The `atom_*`/`number_*`
+family (classic ISO, or long-standing de-facto library predicates)
+works with atoms; the `string_*`/`split_string` family (SWI-style)
+works with real strings instead. They're not interchangeable —
+`atom_chars/2` produces single-character *atoms*, `string_chars/2`
+produces single-character *strings*, and neither unifies with the
+other's output.
+
+### `atom_codes/2` and `atom_chars/2`
+
+Convert an atom to/from a list — `atom_codes/2` to a list of character
+codes (a plain integer list, exactly what `Episteme`'s own code lists
+already are, no wrapping needed), `atom_chars/2` to a list of
+single-character *atoms*. Both work in either direction: with the atom
+bound, they decompose it; with the list bound (and every element
+already bound), they build the atom instead.
+
+```elixir
+Episteme.query(c.(:atom_codes, [:hi, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => ~c"hi"}]}
+
+Episteme.query(c.(:atom_codes, [Term.new_var("A"), ~c"hi"]), Database.new())
+#=> {:ok, [%{"A" => :hi}]}
+
+Episteme.query(c.(:atom_chars, [:hi, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => [:h, :i]}]}
+```
+
+### `atom_length/2`
+
+`atom_length(Atomic, Length)` — the character count (not byte count)
+of any atomic term's text, not just an atom's despite the name.
+
+```elixir
+Episteme.query(c.(:atom_length, [:hello, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => 5}]}
+```
+
+### `atom_concat/3`
+
+With both `Atom1`/`Atom2` bound, concatenates them (as text) into a
+fresh atom. With only `Atom3` bound, enumerates *every* way to split
+its text into a prefix/suffix pair on backtracking — the same
+"generate every candidate, let unification filter it" shape
+`Episteme.Builtins.Lists`' own `append/3` uses over lists, so a caller
+with `Atom1` or `Atom2` already bound gets a narrowed search "for
+free" rather than needing a separate deterministic code path.
+
+```elixir
+Episteme.query(c.(:atom_concat, [:foo, :bar, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :foobar}]}
+
+Episteme.query(c.(:atom_concat, [Term.new_var("X"), Term.new_var("Y"), :ab]), Database.new())
+#=> {:ok, [%{"X" => :"", "Y" => :ab}, %{"X" => :a, "Y" => :b}, %{"X" => :ab, "Y" => :""}]}
+```
+
+### `sub_atom/5`
+
+`sub_atom(Atom, Before, Length, After, Sub)` relates `Atom` to every
+one of its substrings: `Before` characters, then `Length` characters
+(`Sub`), then `After` characters, adding up to the whole. With only
+`Atom` bound, enumerates every decomposition (`Before` outer, `Length`
+inner, both ascending) on backtracking; any of the other four already
+bound narrows the search via unification, the same "generate every
+candidate" shape `atom_concat/3` above uses. `Sub` is always an atom,
+even when `Atom` was a string.
+
+```elixir
+Episteme.query(
+  c.(:sub_atom, [:abc, 1, 2, Term.new_var("After"), Term.new_var("Sub")]),
+  Database.new()
+)
+#=> {:ok, [%{"After" => 0, "Sub" => :bc}]}
+
+Episteme.query(
+  c.(:sub_atom, [:abcabc, Term.new_var("Before"), 3, Term.new_var("After"), :abc]),
+  Database.new()
+)
+#=> {:ok, [%{"Before" => 0, "After" => 3}, %{"Before" => 3, "After" => 0}]}
+```
+
+### `char_code/2`
+
+Relates a single-character atom to its character code, either
+direction.
+
+```elixir
+Episteme.query(c.(:char_code, [:a, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => 97}]}
+```
+
+### `number_codes/2` and `number_chars/2`
+
+Like `atom_codes/2`/`atom_chars/2`, but for numbers -- a bound number
+converts to codes/chars; a bound, well-formed codes/chars list parses
+back to a number (raising `type_error(number, _)` if it doesn't parse
+as one, full stop, with nothing left over).
+
+```elixir
+Episteme.query(c.(:number_codes, [3.5, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => ~c"3.5"}]}
+
+Episteme.query(c.(:number_codes, [Term.new_var("N"), ~c"123"]), Database.new())
+#=> {:ok, [%{"N" => 123}]}
+```
+
+### `upcase_atom/2` and `downcase_atom/2`
+
+```elixir
+Episteme.query(c.(:upcase_atom, [:hello, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :HELLO}]}
+```
+
+### `atomic_list_concat/2` and `atomic_list_concat/3`
+
+The `/2` form concatenates a bound list of atomics into one atom --
+concatenation only, no splitting mode (there's no separator to split
+on). The `/3` form takes a separator: with the list bound, joins its
+elements' text with `Sep` between them; with the list unbound (and the
+result atom bound instead), splits the result's text on `Sep` --
+deterministically, a single split-point sequence via `String.split/2`,
+*not* `atom_concat/3`'s "every possible split" enumeration.
+
+```elixir
+Episteme.query(c.(:atomic_list_concat, [[:foo, :bar, 1], Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :foobar1}]}
+
+Episteme.query(c.(:atomic_list_concat, [[:foo, :bar], :-, Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => :"foo-bar"}]}
+
+Episteme.query(c.(:atomic_list_concat, [Term.new_var("X"), :-, :"foo-bar-baz"]), Database.new())
+#=> {:ok, [%{"X" => [:foo, :bar, :baz]}]}
+```
+
+### `atom_string/2` and `string_to_atom/2`
+
+Convert between an atom and a real string, either direction -- the two
+predicates are the same conversion with the argument order swapped
+(`atom_string(Atom, String)` vs. `string_to_atom(String, Atom)`), both
+provided since real Prolog code uses either depending on which side is
+already bound.
+
+```elixir
+Episteme.query(c.(:atom_string, [:hello, Term.new_var("S")]), Database.new())
+#=> {:ok, [%{"S" => "hello"}]}
+
+Episteme.query(c.(:string_to_atom, ["hello", Term.new_var("A")]), Database.new())
+#=> {:ok, [%{"A" => :hello}]}
+```
+
+### `string_concat/3`, `string_chars/2`, `string_codes/2`, `string_length/2`
+
+The `string_*` counterparts of `atom_concat/3`, `atom_chars/2`,
+`atom_codes/2`, and `atom_length/2` above -- same behavior (including
+`string_concat/3`'s own "enumerate every split" backtracking mode),
+except every result is a real string instead of an atom.
+`string_chars/2` in particular produces single-character *strings*,
+not the single-character *atoms* `atom_chars/2` does.
+
+```elixir
+Episteme.query(c.(:string_concat, ["foo", "bar", Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => "foobar"}]}
+
+Episteme.query(c.(:string_chars, ["hi", Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => ["h", "i"]}]}
+```
+
+### `number_string/2`
+
+Like `atom_string/2`, but for numbers.
+
+```elixir
+Episteme.query(c.(:number_string, [Term.new_var("N"), "42"]), Database.new())
+#=> {:ok, [%{"N" => 42}]}
+```
+
+### `split_string/4`
+
+`split_string(String, SepChars, PadChars, SubStrings)` (SWI): splits
+`String` on every occurrence of any character in `SepChars` (no
+splitting at all -- the whole string as one field -- when `SepChars`
+is `""`), then strips any run of characters found in `PadChars` from
+both ends of each resulting field. Always produces real strings.
+
+```elixir
+Episteme.query(
+  c.(:split_string, ["hello world foo", " ", "", Term.new_var("X")]),
+  Database.new()
+)
+#=> {:ok, [%{"X" => ["hello", "world", "foo"]}]}
+
+Episteme.query(c.(:split_string, ["  hi  ", "", " ", Term.new_var("X")]), Database.new())
+#=> {:ok, [%{"X" => ["hi"]}]}   -- SepChars "" means "don't split", just trim
+```
+
 ---
 
 ## I/O
@@ -890,4 +1508,133 @@ Prints a single newline and succeeds.
 ```elixir
 Episteme.query(:nl, Database.new())
 #=> prints "\n", then {:ok, [%{}]}
+```
+
+### `format/1` and `format/2`
+
+`format(Format, Args)` prints `Format`'s text (an atom or string) with
+each `~`-directive replaced in turn by the next element of `Args`
+(consumed left to right) — `format/1` is `format/2` with `Args = []`.
+A single non-list `Args` is treated as the one-element list `[Args]`,
+so `format("~w", foo)` works without wrapping `foo` yourself.
+
+Deliberately a practical subset of ISO/SWI's own directive set, not
+all of it — no column/radix directives (`~t`, `~|`, `~Nr`, ...), no
+numeric-prefixed `~Nd` ("insert a decimal point `N` digits from the
+right"). `~w`, `~p`, and `~q` are all the same thing here
+(`Episteme.Term.to_text/1`), since there's no operator-aware or quoted
+writer yet to tell them apart with — same caveat `write/1` above
+already has.
+
+| Directive | Consumes an argument? | Meaning |
+|---|---|---|
+| `~w`, `~p`, `~q` | yes | `Episteme.Term.to_text/1` of the argument. |
+| `~a` | yes | The argument's text — must be an atom (`type_error(atom, _)` otherwise). |
+| `~d` | yes | The argument's text — must be an integer (`type_error(integer, _)` otherwise). |
+| `~s` | yes | The argument as text — a code list or a string. |
+| `~i` | yes | Consumes the argument, prints nothing. |
+| `~n` | no | A newline. |
+| `~~` | no | A literal `~`. |
+
+```elixir
+Episteme.query(c.(:format, ["Hello, ~w! You are ~d years old.~n", [:world, 30]]), Database.new())
+#=> prints "Hello, world! You are 30 years old.\n", then {:ok, [%{}]}
+
+Episteme.query(c.(:format, ["codes: ~s", [[104, 105]]]), Database.new())
+#=> prints "codes: hi", then {:ok, [%{}]}
+```
+
+Running out of `Args` for a directive that needs one raises
+`domain_error(format_arguments, [])`; an unrecognized `~`-directive
+raises `domain_error(format_directive, Char)`.
+
+---
+
+## DCG (Definite Clause Grammars)
+
+A DCG rule (`Head --> Body`) is a shorthand for an ordinary clause that
+threads an extra pair of arguments -- an incoming list (`S0`) and an
+outgoing one (`S`) -- through every nonterminal call, so a grammar
+reads like a sequence of things matched/consumed rather than explicit
+list-splitting. `Episteme.Dcg.translate_rule/2`/`translate_body/3` do
+the actual translation; `dcg_translate/2`, a `{:dcg, head, body}`
+`Episteme.Database.consult_forms/2` form, and DCG-rule support in
+`assert/1` (a `-->/2`-shaped clause term, same as `:-/2` is already
+special-cased) all build on it, and `phrase/2,3` is how you *run* a
+DCG body (stored or not) as an ordinary goal.
+
+A practical subset of real DCG translation, not all of it: terminals
+(`[t1, ..., tn]`), an embedded plain goal (`{Goal}`, ISO's own `{}`/1
+term shape -- runs `Goal` without touching the list), `cut`, `and/2`,
+`or/2`, `if_then/2`, `if_then_else/3`, `not/1`, a bare nonterminal
+(atom or compound, any other name -- gets `S0`/`S` appended), and a
+variable body (translated to `phrase(Var, S0, S)`, so a grammar body
+can be decided at call time). No `call//N` pushback support
+(parameterized higher-order nonterminals).
+
+### `phrase/2` and `phrase/3`
+
+`phrase(Body, List)` translates `Body` and calls it with `List` as the
+incoming difference-list and `[]` as the outgoing one -- i.e. `Body`
+must consume *all* of `List`. `phrase(Body, List, Rest)` instead
+leaves whatever `Body` didn't consume in `Rest`. Cut-opaque, same as
+`call/N`. `Body` itself must already be bound -- see the note on
+`Episteme.Dcg`'s own variable-body translation above.
+
+```elixir
+db =
+  Database.new()
+  |> Database.consult_forms([{:dcg, c.(:greeting, []), c.(:and, [[:hello], [:world]])}])
+
+Episteme.query(c.(:phrase, [:greeting, [:hello, :world]]), db)
+#=> {:ok, [%{}]}
+
+Episteme.query(c.(:phrase, [:greeting, [:hello, :world, :extra], Term.new_var("Rest")]), db)
+#=> {:ok, [%{"Rest" => [:extra]}]}
+```
+
+A nonterminal can take its own arguments and embed an ordinary goal via
+`{}/1` -- here, `digit(D) --> [D], {integer(D)}.`:
+
+```elixir
+d = Term.new_var("D")
+
+digit_db =
+  Database.new()
+  |> Database.consult_forms([
+    {:dcg, c.(:digit, [d]), c.(:and, [[d], %Compound{name: :{}, args: [c.(:integer, [d])]}])}
+  ])
+
+Episteme.query(c.(:phrase, [c.(:digit, [Term.new_var("X")]), [5]]), digit_db)
+#=> {:ok, [%{"X" => 5}]}
+```
+
+### `dcg_translate/2`
+
+The readable alias for `-->/2` itself: `dcg_translate(Rule, Clause)`
+unifies `Clause` with the ordinary `Head2 :- Body2` clause term `Rule`
+(a `Head --> Body` term) translates to, without storing anything --
+mainly for introspection. `assert/1` and `Database.consult_forms/2`'s
+own `{:dcg, head, body}` form call `Episteme.Dcg.translate_rule/2`
+directly instead, storing the result rather than unifying it.
+
+```elixir
+Episteme.query(
+  c.(:dcg_translate, [c.(:"-->", [:greeting, [:hello]]), Term.new_var("Clause")]),
+  Database.new()
+)
+#=> {:ok, [%{"Clause" => %Episteme.Term.Compound{name: :":-", args: [greeting(S0, S), unify(S0, [:hello | S])]}}]}
+#   (shown as Prolog-ish text for the two fresh S0/S variables here; the
+#   real value has %Episteme.Term.Var{} structs in their place)
+```
+
+### Asserting a DCG rule dynamically
+
+A `-->/2`-shaped clause term passed to `assert/1` (or `asserta/1`/
+`assertz/1`) is translated exactly like a `{:dcg, head, body}`
+`consult_forms/2` entry, before storage:
+
+```elixir
+rule = c.(:"-->", [c.(:ab, []), c.(:and, [[:a], [:b]])])
+{:ok, [%{}]} = Episteme.query(c.(:assert, [rule]), Database.new())
 ```

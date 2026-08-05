@@ -44,6 +44,68 @@ defmodule Episteme.IoTest do
     end
   end
 
+  describe "format/2" do
+    test "~w, ~a, ~d, and ~n consume one argument each, in order" do
+      output =
+        capture_io(fn ->
+          solutions(db(), c(:format, ["Hello, ~w! You are ~d years old.~n", [:world, 30]]))
+        end)
+
+      assert output == "Hello, world! You are 30 years old.\n"
+    end
+
+    test "~s renders a code list as text" do
+      output = capture_io(fn -> solutions(db(), c(:format, ["codes: ~s", [[104, 105]]])) end)
+      assert output == "codes: hi"
+    end
+
+    test "~~ is a literal tilde" do
+      output = capture_io(fn -> solutions(db(), c(:format, ["100~~ done", []])) end)
+      assert output == "100~ done"
+    end
+
+    test "~i skips the next argument without printing it" do
+      output = capture_io(fn -> solutions(db(), c(:format, ["~i~w", [:skipped, :kept]])) end)
+      assert output == "kept"
+    end
+
+    test "a single non-list Args is treated as a one-element list" do
+      output = capture_io(fn -> solutions(db(), c(:format, ["val=~w", :foo])) end)
+      assert output == "val=foo"
+    end
+
+    test "format/1 is format/2 with no arguments" do
+      output = capture_io(fn -> solutions(db(), c(:format, ["just text"])) end)
+      assert output == "just text"
+    end
+
+    test "always succeeds exactly once" do
+      capture_io(fn -> assert solutions(db(), c(:format, ["~w", [:foo]])) == [%{}] end)
+    end
+
+    test "too few arguments raises domain_error(format_arguments, _)" do
+      {result, _output} =
+        with_io(fn -> solutions(db(), c(:format, ["~w ~w", [:only_one]])) end)
+
+      assert {:error, %Episteme.Term.Compound{name: :error, args: [formal, _]}} = result
+      assert %Episteme.Term.Compound{name: :domain_error, args: [:format_arguments, []]} = formal
+    end
+
+    test "~d on a non-integer raises type_error(integer, _)" do
+      {result, _output} = with_io(fn -> solutions(db(), c(:format, ["~d", [:foo]])) end)
+
+      assert {:error, %Episteme.Term.Compound{name: :error, args: [formal, _]}} = result
+      assert %Episteme.Term.Compound{name: :type_error, args: [:integer, :foo]} = formal
+    end
+
+    test "an unrecognized directive raises domain_error(format_directive, _)" do
+      {result, _output} = with_io(fn -> solutions(db(), c(:format, ["~z", []])) end)
+
+      assert {:error, %Episteme.Term.Compound{name: :error, args: [formal, _]}} = result
+      assert %Episteme.Term.Compound{name: :domain_error, args: [:format_directive, "z"]} = formal
+    end
+  end
+
   describe "sequencing via conjunction" do
     test "write/1 and nl/0 compose in order, once each" do
       output =

@@ -4,13 +4,17 @@ defmodule Episteme.Database do
   clauses, `body` a single term (`true` for a fact, matching real
   Prolog's own internal `Head :- Body` shape) -- looked up by
   `Episteme.Engine` on every user-predicate call, and mutated in place by
-  `Episteme.Engine`'s `assert`/`asserta`/`assertz`/`retract`/`retractall`
-  dispatch. Populated either directly (`add_clause/2`/`add_fact/2`,
+  `Episteme.Engine`'s `assert`/`asserta`/`assertz`/`retract`/`retractall`/
+  `abolish`/`dynamic` dispatch. Populated either directly (`add_clause/2`/`add_fact/2`,
   building terms yourself with `Episteme.Term`) or via `consult_forms/2`,
   for any front-end that parses its own surface syntax into
-  `{:fact, _}`/`{:rule, _, _}` forms (Aletheia's reader is one such
-  front-end, but this module has no dependency on it or any particular
-  concrete syntax).
+  `{:fact, _}`/`{:rule, _, _}`/`{:dcg, _, _}` forms (Aletheia's reader
+  is one such front-end, but this module has no dependency on it or
+  any particular concrete syntax). A `{:dcg, head, body}` form is a
+  DCG rule (`Head --> Body`) -- translated via `Episteme.Dcg.translate_rule/2`
+  into an ordinary clause before storage, same as `assert/1`
+  (`Episteme.Engine`) does for a `-->/2`-shaped clause term asserted
+  directly.
 
   Storage itself is pluggable via `Episteme.Database.Backend`: `new/1`
   defaults to `Episteme.Database.Backends.Ets` (in-memory, indexed by
@@ -96,21 +100,48 @@ defmodule Episteme.Database do
   @spec defined?(t(), atom(), non_neg_integer()) :: boolean()
   def defined?(%__MODULE__{} = db, name, arity), do: db.backend.defined?(db.state, name, arity)
 
+  @doc """
+  Completely removes `{name, arity}` -- unlike `replace_clauses/4` with
+  `[]` (what `retractall/1` builds on), `defined?/3` becomes false
+  again afterward, so a later plain call raises `existence_error`
+  rather than just failing.
+  """
+  @spec abolish(t(), atom(), non_neg_integer()) :: t()
+  def abolish(%__MODULE__{} = db, name, arity) do
+    :ok = db.backend.abolish(db.state, name, arity)
+    db
+  end
+
+  @doc """
+  Marks `{name, arity}` as defined without adding a clause -- what
+  `dynamic/1` builds on. A later plain call to it fails (no matching
+  clauses) instead of raising `existence_error`, and `assert`/`retract`
+  can be used on it immediately. A no-op if it's already defined
+  (existing clauses are never touched).
+  """
+  @spec declare_dynamic(t(), atom(), non_neg_integer()) :: t()
+  def declare_dynamic(%__MODULE__{} = db, name, arity) do
+    if defined?(db, name, arity), do: db, else: replace_clauses(db, name, arity, [])
+  end
+
   @spec indicator(term()) :: indicator()
   def indicator(%Compound{name: name, args: args}), do: {name, length(args)}
   def indicator(atom) when is_atom(atom), do: {atom, 0}
 
   @doc """
-  Loads every `{:fact, head}`/`{:rule, head, body}` form into `db`.
-  `{:directive, _}` forms are ignored here -- a front-end reader's own
-  directives (an `op/3` table mutation, say) are that front-end's
-  concern, not the database's.
+  Loads every `{:fact, head}`/`{:rule, head, body}`/`{:dcg, head, body}`
+  form into `db` -- the latter a DCG rule (`Head --> Body`), translated
+  via `Episteme.Dcg.translate_rule/2` before storage. `{:directive, _}`
+  forms are ignored here -- a front-end reader's own directives (an
+  `op/3` table mutation, say) are that front-end's concern, not the
+  database's.
   """
   @spec consult_forms(t(), list()) :: t()
   def consult_forms(db, forms) do
     Enum.reduce(forms, db, fn
       {:fact, head}, db -> add_fact(db, head)
       {:rule, head, body}, db -> add_clause(db, {head, body})
+      {:dcg, head, body}, db -> add_clause(db, Episteme.Dcg.translate_rule(head, body))
       {:directive, _goal}, db -> db
     end)
   end

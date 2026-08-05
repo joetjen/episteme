@@ -1,5 +1,9 @@
 # Episteme
 
+[![CI](https://github.com/joetjen/episteme/actions/workflows/ci.yml/badge.svg)](https://github.com/joetjen/episteme/actions/workflows/ci.yml)
+[![Docs](https://github.com/joetjen/episteme/actions/workflows/docs.yml/badge.svg)](https://joetjen.github.io/episteme)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **New to logic programming?** This README assumes some familiarity
 with Prolog-style terminology (facts, rules, unification,
 backtracking...) since it's written for evaluating Episteme as a
@@ -50,6 +54,8 @@ Episteme.query(%Compound{name: :grandparent, args: [tom, Term.new_var("Who")]}, 
 
 ## Documentation
 
+- **[Generated API docs](https://joetjen.github.io/episteme)** — module
+  and function reference, rebuilt from `main` on every push.
 - **[TUTORIAL.md](TUTORIAL.md)** — a from-scratch, step-by-step
   walkthrough. Start here if you're new to Episteme.
 - **[REFERENCE.md](REFERENCE.md)** — every control construct,
@@ -58,6 +64,10 @@ Episteme.query(%Compound{name: :grandparent, args: [tom, Term.new_var("Who")]}, 
 - **[EXAMPLES.md](EXAMPLES.md)** — complete, verified-runnable programs
   (a family tree, graph reachability, a key-value store, FizzBuzz, and
   more).
+- **[CASE_STUDY.md](CASE_STUDY.md)** — a single larger, real-world
+  worked example: a structured-log auditor combining a DCG grammar,
+  the dynamic database, and grouped aggregation, with the intent,
+  solution, and result spelled out end to end.
 - **[CHEATSHEET.md](CHEATSHEET.md)** — every predicate and Elixir-side
   function, one page, for once you know your way around ([REFERENCE.md](REFERENCE.md)
   is the page behind each row of it).
@@ -111,7 +121,7 @@ end
 
 - **`Episteme.Term`** — the term representation: atoms/numbers are
   plain Elixir atoms/integers/floats, lists are native Elixir lists
-  (decomposing as ISO's own `'.'/2` cons functor so unification can
+  (decomposing as ISO's own `.`/2 cons functor so unification can
   recurse into them), variables and compounds get dedicated structs.
 - **`Episteme.Database`** — clause storage, indexed by `{name, arity}`,
   storage strategy pluggable via `Episteme.Database.Backend` (in-memory

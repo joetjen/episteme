@@ -5,7 +5,7 @@ defmodule Episteme.Engine do
   over a predicate's clauses in declared order, subgoal sequencing is
   `conjunction/2`, both reused unmodified from Ichor. Control constructs
   (`and`, `or`, `if_then`/`if_then_else`, `cut`, `not/1`, `call/N`,
-  `once/1`) live directly here rather than in a separate builtins
+  `once/1`, `ignore/1`, `phrase/2,3`) live directly here rather than in a separate builtins
   module: they turned out, once actually implemented, to be inseparable
   from the cut-barrier machinery below, not independent predicates
   dispatchable through a generic table. Every one of these is a plain
@@ -46,8 +46,8 @@ defmodule Episteme.Engine do
   zero changes to Ichor itself.
   """
 
-  alias Episteme.Builtins.{Arithmetic, Exceptions, Io, Lists}
-  alias Episteme.{Database, Term}
+  alias Episteme.Builtins.{Arithmetic, Exceptions, Io, Lists, Strings}
+  alias Episteme.{Database, Dcg, Term}
   alias Episteme.Term.{Compound, Var}
   alias Ichor.Backtrack.{Bindings, Tree}
 
@@ -154,6 +154,24 @@ defmodule Episteme.Engine do
     guard_cut(goal(built, db, inner_barrier).(bindings), inner_barrier)
   end
 
+  defp dispatch(%Compound{name: :ignore, args: [g]}, bindings, db, _barrier) do
+    ignore_goal(g, bindings, db)
+  end
+
+  # -- DCG --
+
+  defp dispatch(%Compound{name: :phrase, args: [body, list]}, bindings, db, _barrier) do
+    phrase_goal(body, list, [], db, bindings)
+  end
+
+  defp dispatch(%Compound{name: :phrase, args: [body, list, rest]}, bindings, db, _barrier) do
+    phrase_goal(body, list, rest, db, bindings)
+  end
+
+  defp dispatch(%Compound{name: :dcg_translate, args: [rule, clause]}, bindings, _db, _barrier) do
+    dcg_translate_goal(rule, clause, bindings)
+  end
+
   # -- solution aggregation --
 
   defp dispatch(%Compound{name: :findall, args: [template, g, result]}, bindings, db, _barrier) do
@@ -162,6 +180,35 @@ defmodule Episteme.Engine do
 
   defp dispatch(%Compound{name: :forall, args: [cond_, action]}, bindings, db, _barrier) do
     forall_goal(cond_, action, bindings, db)
+  end
+
+  defp dispatch(%Compound{name: :bagof, args: [template, g, bag]}, bindings, db, _barrier) do
+    aggregate_goal(template, g, bag, bindings, db, :bagof)
+  end
+
+  defp dispatch(%Compound{name: :setof, args: [template, g, bag]}, bindings, db, _barrier) do
+    aggregate_goal(template, g, bag, bindings, db, :setof)
+  end
+
+  # -- higher-order list predicates --
+
+  defp dispatch(%Compound{name: :include, args: [g, list, result]}, bindings, db, _barrier) do
+    filter_goal(g, list, result, db, bindings, true)
+  end
+
+  defp dispatch(%Compound{name: :exclude, args: [g, list, result]}, bindings, db, _barrier) do
+    filter_goal(g, list, result, db, bindings, false)
+  end
+
+  defp dispatch(%Compound{name: :foldl, args: [g | rest]}, bindings, db, _barrier)
+       when length(rest) >= 3 do
+    {lists, [v0, v]} = Enum.split(rest, length(rest) - 2)
+    foldl_goal(g, lists, v0, v, db, bindings)
+  end
+
+  defp dispatch(%Compound{name: :maplist, args: [g | lists]}, bindings, db, _barrier)
+       when lists != [] do
+    maplist_goal(g, lists, db, bindings)
   end
 
   # -- unification / comparison --
@@ -180,11 +227,41 @@ defmodule Episteme.Engine do
     end
   end
 
+  defp dispatch(
+         %Compound{name: :unify_with_occurs_check, args: [a, b]},
+         bindings,
+         _db,
+         _barrier
+       ) do
+    case Bindings.unify_occurs_check(Term, bindings, a, b) do
+      {:ok, extended} -> Tree.unit().(extended)
+      :fail -> Tree.fail().(bindings)
+    end
+  end
+
   defp dispatch(%Compound{name: :equal, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(structurally_equal?(a, b, bindings), bindings)
 
   defp dispatch(%Compound{name: :not_equal, args: [a, b]}, bindings, _db, _barrier),
     do: bool_goal(not structurally_equal?(a, b, bindings), bindings)
+
+  # -- standard order of terms (real Prolog: @<, @>, @=<, @>=, compare/3) --
+
+  defp dispatch(%Compound{name: :order_less, args: [a, b]}, bindings, _db, _barrier),
+    do: bool_goal(order_compare(a, b, bindings) == :lt, bindings)
+
+  defp dispatch(%Compound{name: :order_greater, args: [a, b]}, bindings, _db, _barrier),
+    do: bool_goal(order_compare(a, b, bindings) == :gt, bindings)
+
+  defp dispatch(%Compound{name: :order_less_or_equal, args: [a, b]}, bindings, _db, _barrier),
+    do: bool_goal(order_compare(a, b, bindings) in [:lt, :eq], bindings)
+
+  defp dispatch(%Compound{name: :order_greater_or_equal, args: [a, b]}, bindings, _db, _barrier),
+    do: bool_goal(order_compare(a, b, bindings) in [:gt, :eq], bindings)
+
+  defp dispatch(%Compound{name: :compare, args: [order, a, b]}, bindings, _db, _barrier) do
+    unify_or_fail(bindings, order, order_atom(order_compare(a, b, bindings)))
+  end
 
   # -- type checks --
 
@@ -235,6 +312,9 @@ defmodule Episteme.Engine do
 
   defp dispatch(%Compound{name: :is_list, args: [x]}, bindings, _db, _barrier),
     do: bool_goal(proper_list?(x, bindings), bindings)
+
+  defp dispatch(%Compound{name: :string, args: [x]}, bindings, _db, _barrier),
+    do: bool_goal(is_binary(Bindings.resolve(Term, bindings, x)), bindings)
 
   # -- arithmetic --
 
@@ -297,15 +377,36 @@ defmodule Episteme.Engine do
     prolog_throw(Exceptions.instantiation_error())
   end
 
-  # -- copy_term/2 --
+  defp dispatch(%Compound{name: :existence_error, args: [type, culprit]}, bindings, _db, _barrier) do
+    prolog_throw(
+      Exceptions.existence_error(
+        Bindings.resolve(Term, bindings, type),
+        Term.resolve_deep(culprit, bindings)
+      )
+    )
+  end
+
+  # -- term inspection --
 
   defp dispatch(%Compound{name: :copy_term, args: [t, copy]}, bindings, _db, _barrier) do
     fresh = t |> Term.resolve_deep(bindings) |> Term.fresh_copy()
+    unify_or_fail(bindings, copy, fresh)
+  end
 
-    case Bindings.unify(Term, bindings, copy, fresh) do
-      {:ok, extended} -> Tree.unit().(extended)
-      :fail -> Tree.fail().(bindings)
-    end
+  defp dispatch(%Compound{name: :ground, args: [x]}, bindings, _db, _barrier) do
+    bool_goal(x |> Term.resolve_deep(bindings) |> Term.ground?(), bindings)
+  end
+
+  defp dispatch(%Compound{name: :functor, args: [t, name, arity]}, bindings, _db, _barrier) do
+    functor_goal(t, name, arity, bindings)
+  end
+
+  defp dispatch(%Compound{name: :arg, args: [n, t, a]}, bindings, _db, _barrier) do
+    arg_goal(n, t, a, bindings)
+  end
+
+  defp dispatch(%Compound{name: :univ, args: [t, l]}, bindings, _db, _barrier) do
+    univ_goal(t, l, bindings)
   end
 
   # -- dynamic database (assert/retract) --
@@ -327,11 +428,24 @@ defmodule Episteme.Engine do
     retractall_goal(head_pattern, bindings, db)
   end
 
-  # -- arithmetic / lists / io, then user-defined predicates --
+  defp dispatch(%Compound{name: :abolish, args: [indicator]}, bindings, db, _barrier) do
+    abolish_goal(indicator, bindings, db)
+  end
+
+  defp dispatch(%Compound{name: :dynamic, args: [spec]}, bindings, db, _barrier) do
+    dynamic_goal(spec, bindings, db)
+  end
+
+  defp dispatch(%Compound{name: :clause, args: [head, body]}, bindings, db, _barrier) do
+    builtin_clause_goal(head, body, db, bindings)
+  end
+
+  # -- arithmetic / lists / strings / io, then user-defined predicates --
 
   defp dispatch(%Compound{name: name, args: args}, bindings, db, _barrier) do
     with :not_handled <- Arithmetic.dispatch(name, length(args), args),
          :not_handled <- Lists.dispatch(name, length(args), args),
+         :not_handled <- Strings.dispatch(name, length(args), args),
          :not_handled <- Io.dispatch(name, length(args), args) do
       solve_user_predicate(name, args, bindings, db)
     else
@@ -351,9 +465,157 @@ defmodule Episteme.Engine do
   defp bool_goal(true, bindings), do: Tree.unit().(bindings)
   defp bool_goal(false, bindings), do: Tree.fail().(bindings)
 
+  defp unify_or_fail(bindings, a, b) do
+    case Bindings.unify(Term, bindings, a, b) do
+      {:ok, extended} -> Tree.unit().(extended)
+      :fail -> Tree.fail().(bindings)
+    end
+  end
+
+  # `functor(T, Name, Arity)`: with `T` bound, decomposes it (an atomic
+  # term has itself as Name and arity 0, matching ISO -- a non-empty
+  # list decomposes via Term.compound?/1's own './2' encoding, same as
+  # everywhere else in this module). With `T` unbound, builds a fresh
+  # term from Name/Arity instead: arity 0 just unifies T with Name
+  # as-is (whatever atomic value it is), arity > 0 requires an atom
+  # Name and builds a compound of that many fresh variables.
+  defp functor_goal(t, name_arg, arity_arg, bindings) do
+    case Bindings.resolve(Term, bindings, t) do
+      %Var{} ->
+        name = resolve_instantiated(name_arg, bindings)
+        arity = resolve_instantiated(arity_arg, bindings)
+        unify_or_fail(bindings, t, build_from_functor(name, arity))
+
+      resolved ->
+        {name, arity} = functor_of(resolved)
+
+        with {:ok, b1} <- Bindings.unify(Term, bindings, name_arg, name),
+             {:ok, b2} <- Bindings.unify(Term, b1, arity_arg, arity) do
+          Tree.unit().(b2)
+        else
+          :fail -> Tree.fail().(bindings)
+        end
+    end
+  end
+
+  defp functor_of(resolved) do
+    if Term.compound?(resolved) do
+      {name, args} = Term.deconstruct(resolved)
+      {name, length(args)}
+    else
+      {resolved, 0}
+    end
+  end
+
+  defp resolve_instantiated(term, bindings) do
+    case Bindings.resolve(Term, bindings, term) do
+      %Var{} -> prolog_throw(Exceptions.instantiation_error())
+      resolved -> resolved
+    end
+  end
+
+  defp build_from_functor(name, 0), do: name
+
+  defp build_from_functor(name, arity) when is_atom(name) and is_integer(arity) and arity > 0,
+    do: Term.reconstruct(name, for(_ <- 1..arity, do: Term.new_var()))
+
+  defp build_from_functor(name, arity) when is_integer(arity) and arity > 0,
+    do: prolog_throw(Exceptions.type_error(:atom, name))
+
+  defp build_from_functor(_name, arity),
+    do: prolog_throw(Exceptions.domain_error(:not_less_than_zero, arity))
+
+  # `arg(N, Term, Arg)`: 1-based, like nth1/3. Out-of-range N (< 1 or >
+  # arity) just fails, matching this project's existing nth0/nth1
+  # style, rather than chasing ISO's own domain_error(not_less_than_zero, N)
+  # distinction for negative N specifically.
+  defp arg_goal(n_arg, t_arg, a_arg, bindings) do
+    n = resolve_instantiated(n_arg, bindings)
+    t = resolve_instantiated(t_arg, bindings)
+
+    cond do
+      not is_integer(n) -> prolog_throw(Exceptions.type_error(:integer, n))
+      not Term.compound?(t) -> prolog_throw(Exceptions.type_error(:compound, t))
+      true -> select_arg(n, t, a_arg, bindings)
+    end
+  end
+
+  # Explicit `n < 1`/`n > length(args)` bounds check rather than
+  # trusting `Enum.at/2`'s `nil` sentinel for "out of range": a
+  # negative index counts from the *end* of the list in `Enum.at/2`
+  # (so `arg(0, foo(a,b), X)` would otherwise wrongly succeed with
+  # `X = b`, via `Enum.at(args, -1)`), and a stored argument can itself
+  # legitimately be the atom `nil`, which is indistinguishable from
+  # "not found" if `Enum.at/2`'s own return value is what gets matched.
+  defp select_arg(n, t, a_arg, bindings) do
+    {_name, args} = Term.deconstruct(t)
+
+    if n >= 1 and n <= length(args) do
+      unify_or_fail(bindings, a_arg, Enum.at(args, n - 1))
+    else
+      Tree.fail().(bindings)
+    end
+  end
+
+  # `univ(Term, List)` (`=..`/2 in ISO's own punctuation): with `Term`
+  # bound, decomposes it the same way functor/3 does (Name alone for an
+  # atomic term, [Name | Args] for a compound). With `Term` unbound,
+  # builds it back from a fully-instantiated [Name | Args] list --
+  # Term.reconstruct/2 already special-cases Name = :. with two args
+  # into a native list, so that shape round-trips through here for
+  # free, same as functor/3.
+  defp univ_goal(t_arg, l_arg, bindings) do
+    case Bindings.resolve(Term, bindings, t_arg) do
+      %Var{} -> univ_construct(l_arg, t_arg, bindings)
+      resolved -> univ_decompose(resolved, l_arg, bindings)
+    end
+  end
+
+  defp univ_decompose(resolved, l_arg, bindings) do
+    list =
+      if Term.compound?(resolved) do
+        {name, args} = Term.deconstruct(resolved)
+        [name | args]
+      else
+        [resolved]
+      end
+
+    unify_or_fail(bindings, l_arg, list)
+  end
+
+  defp univ_construct(l_arg, t_arg, bindings) do
+    case Term.resolve_deep(l_arg, bindings) do
+      %Var{} ->
+        prolog_throw(Exceptions.instantiation_error())
+
+      [name] ->
+        unify_or_fail(bindings, t_arg, name)
+
+      [name | args] when is_atom(name) ->
+        unify_or_fail(bindings, t_arg, Term.reconstruct(name, args))
+
+      [name | _args] ->
+        prolog_throw(Exceptions.type_error(:atom, name))
+
+      [] ->
+        prolog_throw(Exceptions.domain_error(:non_empty_list, []))
+
+      other ->
+        prolog_throw(Exceptions.type_error(:list, other))
+    end
+  end
+
   defp structurally_equal?(a, b, bindings) do
     Term.structurally_equal?(Term.resolve_deep(a, bindings), Term.resolve_deep(b, bindings))
   end
+
+  defp order_compare(a, b, bindings) do
+    Term.compare_order(Term.resolve_deep(a, bindings), Term.resolve_deep(b, bindings))
+  end
+
+  defp order_atom(:lt), do: :<
+  defp order_atom(:eq), do: :=
+  defp order_atom(:gt), do: :>
 
   defp proper_list?(x, bindings) do
     case Bindings.resolve(Term, bindings, x) do
@@ -380,6 +642,66 @@ defmodule Episteme.Engine do
     case Tree.next(stream) do
       {:solution, _bindings, _rest} -> Tree.fail().(bindings)
       :empty -> Tree.unit().(bindings)
+    end
+  end
+
+  # `ignore(Goal)` <-> `(call(Goal) -> true ; true)`: commits to `Goal`'s
+  # first solution like `once/1`, but never fails -- if `Goal` has no
+  # solution, still succeeds, with `bindings` left exactly as they were.
+  # Cut-opaque, same as `once/1`.
+  defp ignore_goal(g, bindings, db) do
+    inner_barrier = make_ref()
+    stream = guard_cut(goal(g, db, inner_barrier).(bindings), inner_barrier)
+
+    case Tree.next(stream) do
+      {:solution, sol_bindings, _rest} -> Tree.unit().(sol_bindings)
+      :empty -> Tree.unit().(bindings)
+    end
+  end
+
+  # `phrase(Body, List)`/`phrase(Body, List, Rest)`: translates `Body`
+  # (a DCG body -- see `Episteme.Dcg`) into an ordinary goal threading
+  # `List`/`Rest` as the incoming/outgoing difference list, then solves
+  # it exactly like `call/N` (fresh barrier, cut-opaque). `Body` itself
+  # must already be bound -- an unbound body would otherwise translate
+  # to `phrase(Body, List, Rest)` right back (`Episteme.Dcg.translate_body/3`'s
+  # own variable-body case, meant for a *nested* DCG body position, not
+  # this top-level one) and loop forever instead of raising the
+  # `instantiation_error` real Prolog does.
+  defp phrase_goal(body_arg, list_arg, rest_arg, db, bindings) do
+    case Bindings.resolve(Term, bindings, body_arg) do
+      %Var{} ->
+        prolog_throw(Exceptions.instantiation_error())
+
+      resolved_body ->
+        translated =
+          Dcg.translate_body(Term.resolve_deep(resolved_body, bindings), list_arg, rest_arg)
+
+        inner_barrier = make_ref()
+        guard_cut(goal(translated, db, inner_barrier).(bindings), inner_barrier)
+    end
+  end
+
+  # `dcg_translate(Rule, Clause)`: the readable alias for `-->/2` itself
+  # -- unifies `Clause` with the ordinary `Head2 :- Body2` clause term
+  # `Rule` (a `Head --> Body` term) translates to, without storing
+  # anything. Exposed mainly for introspection/testing; `assert/1` and
+  # `Database.consult_forms/2`'s
+  # own `{:dcg, head, body}` form call `Episteme.Dcg.translate_rule/2`
+  # directly, storing the result instead of unifying it.
+  defp dcg_translate_goal(rule_arg, clause_arg, bindings) do
+    case Bindings.resolve(Term, bindings, rule_arg) do
+      %Compound{name: :"-->", args: [head, body]} ->
+        {new_head, new_body} =
+          Dcg.translate_rule(Term.resolve_deep(head, bindings), Term.resolve_deep(body, bindings))
+
+        unify_or_fail(bindings, clause_arg, %Compound{name: :":-", args: [new_head, new_body]})
+
+      %Var{} ->
+        prolog_throw(Exceptions.instantiation_error())
+
+      other ->
+        prolog_throw(Exceptions.type_error(:"-->", other))
     end
   end
 
@@ -436,6 +758,109 @@ defmodule Episteme.Engine do
     end
   end
 
+  # `bagof(Template, Goal, Bag)`/`setof(Template, Goal, Bag)`: like
+  # findall/3, but (a) fail outright instead of succeeding with `[]`
+  # when `Goal` has no solutions, and (b) group solutions by the
+  # current bindings of `Goal`'s own "free" variables -- every
+  # variable `Goal` mentions that `Template` doesn't and that isn't
+  # existentially quantified via `Var^Goal` (`V1^V2^...^Goal` strips
+  # each `Vn` in turn) -- backtracking through one solution per
+  # distinct combination of free-variable values, unifying `Bag` with
+  # that group's own `Template` instances. `setof/3` additionally
+  # sorts (and dedups) each group's `Bag` by standard order of terms,
+  # via `Term.sort_unique/1`; `bagof/3` keeps first-solution order.
+  defp aggregate_goal(template, g, bag, bindings, db, kind) do
+    {existential_vars, inner_goal} = strip_existential(g, bindings)
+
+    witness_term = %Compound{
+      name: :"$witness",
+      args: free_variables(inner_goal, template, existential_vars)
+    }
+
+    inner_barrier = make_ref()
+    stream = guard_cut(goal(inner_goal, db, inner_barrier).(bindings), inner_barrier)
+    pairs = collect_witness_pairs(stream, witness_term, template)
+
+    case group_by_witness(pairs) do
+      [] ->
+        Tree.fail().(bindings)
+
+      groups ->
+        aggregate_disjunction(order_groups(groups, kind), witness_term, bag, kind).(bindings)
+    end
+  end
+
+  defp order_groups(groups, :bagof), do: groups
+
+  defp order_groups(groups, :setof) do
+    Enum.sort(groups, fn {w1, _}, {w2, _} -> Term.compare_order(w1, w2) != :gt end)
+  end
+
+  defp strip_existential(g, bindings) do
+    case Bindings.resolve(Term, bindings, g) do
+      %Compound{name: :^, args: [v, rest]} ->
+        {inner_vars, inner_goal} = strip_existential(rest, bindings)
+        {Term.term_variables(v) ++ inner_vars, inner_goal}
+
+      resolved ->
+        {[], resolved}
+    end
+  end
+
+  defp free_variables(inner_goal, template, existential_vars) do
+    excluded =
+      (Term.term_variables(template) ++ existential_vars)
+      |> Enum.map(& &1.ref)
+      |> MapSet.new()
+
+    inner_goal
+    |> Term.term_variables()
+    |> Enum.reject(&MapSet.member?(excluded, &1.ref))
+  end
+
+  defp collect_witness_pairs(stream, witness_term, template) do
+    case Tree.next(stream) do
+      :empty ->
+        []
+
+      {:solution, sol_bindings, rest} ->
+        pair =
+          {Term.resolve_deep(witness_term, sol_bindings),
+           Term.resolve_deep(template, sol_bindings)}
+
+        [pair | collect_witness_pairs(rest, witness_term, template)]
+    end
+  end
+
+  defp group_by_witness(pairs) do
+    Enum.reduce(pairs, [], fn {witness, template}, groups ->
+      case Enum.find_index(groups, fn {w, _templates} -> Term.structurally_equal?(w, witness) end) do
+        nil -> groups ++ [{witness, [template]}]
+        idx -> List.update_at(groups, idx, fn {w, templates} -> {w, templates ++ [template]} end)
+      end
+    end)
+  end
+
+  defp aggregate_disjunction(groups, witness_term, bag, kind) do
+    Enum.reduce(groups, Tree.fail(), fn group, acc ->
+      Tree.disjunction(acc, aggregate_group_goal(group, witness_term, bag, kind))
+    end)
+  end
+
+  defp aggregate_group_goal({witness, templates}, witness_term, bag, kind) do
+    fn bindings ->
+      with {:ok, b1} <- Bindings.unify(Term, bindings, witness_term, witness),
+           {:ok, b2} <- Bindings.unify(Term, b1, bag, finalize_group(templates, kind)) do
+        Tree.unit().(b2)
+      else
+        :fail -> Tree.fail().(bindings)
+      end
+    end
+  end
+
+  defp finalize_group(templates, :bagof), do: templates
+  defp finalize_group(templates, :setof), do: Term.sort_unique(templates)
+
   defp build_call(g, [], _bindings), do: g
 
   defp build_call(g, extra, bindings) do
@@ -445,6 +870,161 @@ defmodule Episteme.Engine do
       %Var{} -> prolog_throw(Exceptions.instantiation_error())
     end
   end
+
+  # `include/3`/`exclude/3`: `Goal` is called once per element, cut-opaque
+  # (own fresh barrier per call, same as `call/N`), as a plain
+  # existence check via `Tree.next/1` -- exactly `negation_as_failure/3`'s
+  # own pattern. Neither predicate propagates bindings `Goal` makes back
+  # into the kept elements themselves; they only test membership.
+  defp filter_goal(g, list, result, db, bindings, keep_on_success) do
+    case list_elements(list, bindings) do
+      {:ok, elements} ->
+        kept =
+          Enum.filter(elements, fn el ->
+            goal_succeeds?(g, [el], db, bindings) == keep_on_success
+          end)
+
+        unify_or_fail(bindings, result, kept)
+
+      :error ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp goal_succeeds?(g, extra_args, db, bindings) do
+    built = build_call(g, extra_args, bindings)
+    inner_barrier = make_ref()
+    stream = guard_cut(goal(built, db, inner_barrier).(bindings), inner_barrier)
+
+    case Tree.next(stream) do
+      {:solution, _bindings, _rest} -> true
+      :empty -> false
+    end
+  end
+
+  # A proper list's elements, as-is (not resolved) -- callers pass these
+  # straight into a built `call/N` goal, so an element that's still an
+  # unbound variable stays one, exactly like any other goal argument.
+  defp list_elements(list, bindings) do
+    case Bindings.resolve(Term, bindings, list) do
+      [] ->
+        {:ok, []}
+
+      [h | t] ->
+        case list_elements(t, bindings) do
+          {:ok, rest} -> {:ok, [h | rest]}
+          :error -> :error
+        end
+
+      _not_a_proper_list ->
+        :error
+    end
+  end
+
+  defp and_goal(a, b), do: %Compound{name: :and, args: [a, b]}
+
+  # `foldl(Goal, List1, ..., ListN, V0, V)`: every list argument must
+  # already be a proper, bound list (unlike `maplist/N` below, this one
+  # has no "generate an unbound list" mode) -- builds one right-nested
+  # `and/2` chain of `call(Goal, Elem1_i, ..., ElemN_i, AccIn_i,
+  # AccOut_i)` per row, threading each row's `AccOut` into the next
+  # row's `AccIn`, then dispatches the whole tree through the ordinary
+  # `goal/3` machinery (real backtracking through every row's own
+  # alternative solutions, for free, the same way `,`/2 always has).
+  defp foldl_goal(g, lists, v0, v, db, bindings) do
+    resolved = Enum.map(lists, &list_elements(&1, bindings))
+
+    if Enum.all?(resolved, &match?({:ok, _}, &1)) do
+      element_lists = Enum.map(resolved, fn {:ok, els} -> els end)
+      run_foldl(g, element_lists, v0, v, db, bindings)
+    else
+      Tree.fail().(bindings)
+    end
+  end
+
+  defp run_foldl(g, element_lists, v0, v, db, bindings) do
+    case Enum.uniq(Enum.map(element_lists, &length/1)) do
+      [_same_length] ->
+        rows = transpose(element_lists)
+        {body, final_acc} = build_foldl_conjunction(g, rows, v0)
+        full_goal = and_goal(body, %Compound{name: :unify, args: [v, final_acc]})
+        inner_barrier = make_ref()
+        guard_cut(goal(full_goal, db, inner_barrier).(bindings), inner_barrier)
+
+      [] ->
+        unify_or_fail(bindings, v, v0)
+
+      _mismatched_lengths ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp build_foldl_conjunction(_g, [], v0), do: {true, v0}
+
+  defp build_foldl_conjunction(g, [row | rows], v0) do
+    acc_out = Term.new_var("_")
+    step = %Compound{name: :call, args: [g | row ++ [v0, acc_out]]}
+    {rest, final_acc} = build_foldl_conjunction(g, rows, acc_out)
+    {and_goal(step, rest), final_acc}
+  end
+
+  # `maplist(Goal, List1, ..., ListN)`: at least one list must already
+  # be a proper, bound list, fixing the row count -- any other list
+  # argument that isn't yet bound gets unified with a fresh list of
+  # that many brand-new variables first (same "generate a list of fresh
+  # variables from a known length" shape `length/2` already has, in
+  # Episteme.Builtins.Lists), then the same "one and/2 chain of call/N
+  # per row" tree `foldl_goal/6` builds, minus the accumulator.
+  defp maplist_goal(g, lists, db, bindings) do
+    resolved = Enum.map(lists, &list_elements(&1, bindings))
+
+    case known_length(resolved) do
+      {:ok, n} ->
+        {element_lists, prereqs} = materialize_lists(lists, resolved, n)
+        rows = transpose(element_lists)
+        body = Enum.reduce(prereqs, build_call_conjunction(g, rows), &and_goal/2)
+        inner_barrier = make_ref()
+        guard_cut(goal(body, db, inner_barrier).(bindings), inner_barrier)
+
+      :error ->
+        Tree.fail().(bindings)
+    end
+  end
+
+  defp known_length(resolved) do
+    lengths =
+      resolved
+      |> Enum.filter(&match?({:ok, _}, &1))
+      |> Enum.map(fn {:ok, els} -> length(els) end)
+
+    case Enum.uniq(lengths) do
+      [n] -> {:ok, n}
+      _no_or_conflicting_lengths -> :error
+    end
+  end
+
+  defp materialize_lists(lists, resolved, n) do
+    Enum.zip(lists, resolved)
+    |> Enum.map(fn
+      {_list_term, {:ok, els}} ->
+        {els, nil}
+
+      {list_term, :error} ->
+        fresh = for(_ <- 1..n, do: Term.new_var("_"))
+        {fresh, %Compound{name: :unify, args: [list_term, fresh]}}
+    end)
+    |> Enum.unzip()
+    |> then(fn {element_lists, prereqs} -> {element_lists, Enum.reject(prereqs, &is_nil/1)} end)
+  end
+
+  defp build_call_conjunction(_g, []), do: true
+  defp build_call_conjunction(g, [row]), do: %Compound{name: :call, args: [g | row]}
+
+  defp build_call_conjunction(g, [row | rows]) do
+    and_goal(%Compound{name: :call, args: [g | row]}, build_call_conjunction(g, rows))
+  end
+
+  defp transpose(lists), do: lists |> Enum.zip() |> Enum.map(&Tuple.to_list/1)
 
   defp catch_goal(g, catcher, recovery, bindings, db, barrier) do
     inner_barrier = make_ref()
@@ -519,6 +1099,11 @@ defmodule Episteme.Engine do
 
   defp store_clause(%Compound{name: :":-", args: [head, body]}, db, position),
     do: assert_clause(head, body, db, position)
+
+  defp store_clause(%Compound{name: :"-->", args: [head, body]}, db, position) do
+    {dcg_head, dcg_body} = Dcg.translate_rule(head, body)
+    assert_clause(dcg_head, dcg_body, db, position)
+  end
 
   defp store_clause(%Var{}, _db, _position), do: prolog_throw(Exceptions.instantiation_error())
   defp store_clause(%Compound{} = head, db, position), do: assert_clause(head, true, db, position)
@@ -607,6 +1192,106 @@ defmodule Episteme.Engine do
 
     Database.replace_clauses(db, name, arity, kept)
     Tree.unit().(bindings)
+  end
+
+  # `abolish(Name/Arity)`: unlike `retractall/1`, leaves the predicate
+  # genuinely undefined again -- a later plain call raises
+  # `existence_error` rather than just failing.
+  defp abolish_goal(indicator, bindings, db) do
+    case predicate_indicator(indicator, bindings) do
+      {:ok, name, arity} ->
+        Database.abolish(db, name, arity)
+        Tree.unit().(bindings)
+
+      :error ->
+        prolog_throw(Exceptions.type_error(:predicate_indicator, indicator))
+    end
+  end
+
+  # `dynamic(Name/Arity)` or `dynamic([Name/Arity, ...])`: marks each
+  # indicator defined without adding a clause, so a plain call fails
+  # (no matching clauses) instead of raising `existence_error`, and
+  # `assert`/`retract` can be used on it right away. A no-op for an
+  # indicator that already has clauses -- see `Database.declare_dynamic/3`.
+  defp dynamic_goal(spec, bindings, db) do
+    case Bindings.resolve(Term, bindings, spec) do
+      %Compound{name: :/} ->
+        case predicate_indicator(spec, bindings) do
+          {:ok, name, arity} ->
+            Database.declare_dynamic(db, name, arity)
+            Tree.unit().(bindings)
+
+          :error ->
+            prolog_throw(Exceptions.type_error(:predicate_indicator, spec))
+        end
+
+      list when is_list(list) ->
+        declare_all_dynamic(list, bindings, db)
+        Tree.unit().(bindings)
+
+      _not_an_indicator_or_list ->
+        prolog_throw(Exceptions.type_error(:predicate_indicator, spec))
+    end
+  end
+
+  defp declare_all_dynamic([], _bindings, _db), do: :ok
+
+  defp declare_all_dynamic([indicator | rest], bindings, db) do
+    case predicate_indicator(indicator, bindings) do
+      {:ok, name, arity} ->
+        Database.declare_dynamic(db, name, arity)
+        declare_all_dynamic(rest, bindings, db)
+
+      :error ->
+        prolog_throw(Exceptions.type_error(:predicate_indicator, indicator))
+    end
+  end
+
+  defp predicate_indicator(term, bindings) do
+    case Bindings.resolve(Term, bindings, term) do
+      %Compound{name: :/, args: [name, arity]}
+      when is_atom(name) and is_integer(arity) and arity >= 0 ->
+        {:ok, name, arity}
+
+      _other ->
+        :error
+    end
+  end
+
+  # `clause(Head, Body)`: enumerates every stored clause for `Head`'s
+  # own `{name, arity}` whose (freshened) head unifies with `Head`, one
+  # per backtrack, unifying `Body` with that clause's own (freshened)
+  # body -- the same `Term.fresh_copy/1` "rename apart together, via a
+  # throwaway $clause wrapper" trick `retract_goal/3`'s own
+  # `find_matching_clause/4` uses, so `Head`/`Body` share renamed
+  # variables correctly when a clause's head and body both reference
+  # the same one.
+  defp builtin_clause_goal(head, body, db, bindings) do
+    case Bindings.resolve(Term, bindings, head) do
+      %Var{} ->
+        prolog_throw(Exceptions.instantiation_error())
+
+      resolved_head ->
+        {name, arity} = Database.indicator(resolved_head)
+
+        Database.clauses_for(db, name, arity)
+        |> Enum.reduce(Tree.fail(), fn stored, acc ->
+          Tree.disjunction(acc, fn b -> unify_clause_pair(head, body, stored, b) end)
+        end)
+        |> then(& &1.(bindings))
+    end
+  end
+
+  defp unify_clause_pair(head, body, {stored_head, stored_body}, bindings) do
+    %Compound{args: [fresh_head, fresh_body]} =
+      Term.fresh_copy(%Compound{name: :"$clause", args: [stored_head, stored_body]})
+
+    with {:ok, b1} <- Bindings.unify(Term, bindings, head, fresh_head),
+         {:ok, b2} <- Bindings.unify(Term, b1, body, fresh_body) do
+      Tree.unit().(b2)
+    else
+      :fail -> Tree.fail().(bindings)
+    end
   end
 
   @spec prolog_throw(term()) :: no_return()

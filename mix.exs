@@ -1,7 +1,7 @@
 defmodule Episteme.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
 
   def project do
     [
@@ -83,9 +83,12 @@ defmodule Episteme.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/joetjen/episteme"},
+      links: %{
+        "GitHub" => "https://github.com/joetjen/episteme",
+        "Docs" => "https://joetjen.github.io/episteme"
+      },
       files: ~w(lib .formatter.exs mix.exs README.md TUTORIAL.md REFERENCE.md EXAMPLES.md
-           CHEATSHEET.md CHANGELOG.md CONTRIBUTING.md LICENSE)
+           CASE_STUDY.md CHEATSHEET.md CHANGELOG.md CONTRIBUTING.md LICENSE)
     ]
   end
 
@@ -94,6 +97,7 @@ defmodule Episteme.MixProject do
       main: "readme",
       source_url: "https://github.com/joetjen/episteme",
       source_ref: "v#{@version}",
+      homepage_url: "https://joetjen.github.io/episteme",
       extras: extras(),
       groups_for_modules: groups_for_modules()
     ]
@@ -101,14 +105,16 @@ defmodule Episteme.MixProject do
 
   # Doc navigation order: README first (it's `main`), then the
   # learn-the-library docs -- narrative walkthrough, full feature-by-
-  # feature reference, then worked programs -- then the quick lookup
-  # doc, then project-process docs last.
+  # feature reference, then worked programs (many small ones, then one
+  # large one) -- then the quick lookup doc, then project-process docs
+  # last.
   defp extras do
     [
       "README.md",
       "TUTORIAL.md",
       "REFERENCE.md",
       "EXAMPLES.md",
+      "CASE_STUDY.md",
       "CHEATSHEET.md",
       "CHANGELOG.md",
       "CONTRIBUTING.md",
