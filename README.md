@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/joetjen/episteme/actions/workflows/ci.yml/badge.svg)](https://github.com/joetjen/episteme/actions/workflows/ci.yml)
 [![Docs](https://github.com/joetjen/episteme/actions/workflows/docs.yml/badge.svg)](https://joetjen.github.io/episteme)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 **New to logic programming?** This README assumes some familiarity
 with Prolog-style terminology (facts, rules, unification,
@@ -74,7 +74,7 @@ Episteme.query(%Compound{name: :grandparent, args: [tom, Term.new_var("Who")]}, 
 - **[CHANGELOG.md](CHANGELOG.md)** — release history.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — workflow, commit style, what
   has to pass before a change lands.
-- **[LICENSE](LICENSE)** — MIT.
+- **[LICENSE](LICENSE)** — Apache-2.0.
 
 ## Why a separate package from Aletheia
 

@@ -82,7 +82,7 @@ defmodule Episteme.MixProject do
 
   defp package do
     [
-      licenses: ["MIT"],
+      licenses: ["Apache-2.0"],
       links: %{
         "GitHub" => "https://github.com/joetjen/episteme",
         "Docs" => "https://joetjen.github.io/episteme"
