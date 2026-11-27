@@ -30,3 +30,6 @@ episteme-*.tar
 
 # macOS
 .DS_Store
+
+# Libraries do not check in their lock file.
+/mix.lock
